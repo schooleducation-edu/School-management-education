@@ -664,7 +664,7 @@ img, canvas, svg { max-width: 100%; height: auto; }
             </div>
             <div class="text-center mb-8">
                 <h1 class="text-3xl font-extrabold text-gray-900">THE EDUCATORS SCHOOL</h1>
-                <p class="text-blue-600 font-bold text-sm mt-1 uppercase">Ahmd Haseeb Campus</p>
+                <p class="text-blue-600 font-bold text-sm mt-1 uppercase">Ahmad Haseeb Campus</p>
                 <p class="text-gray-500 text-xs mt-1 font-semibold uppercase">A PROJECT OF BEACONHOUSE</p>
                 <p class="text-gray-500 text-xs mt-2">Complete School Management System v10.2</p>
             </div>
@@ -790,7 +790,7 @@ img, canvas, svg { max-width: 100%; height: auto; }
                         </div>
                         <div>
                             <h1 class="font-bold text-lg">THE EDUCATORS SCHOOL</h1>
-                            <p class="text-xs text-blue-200 hidden sm:block uppercase">Ahmd Haseeb Campus</p>
+                            <p class="text-xs text-blue-200 hidden sm:block uppercase">Ahmad Haseeb Campus</p>
                             <p class="text-[9px] text-blue-200 hidden sm:block uppercase opacity-90">A PROJECT OF BEACONHOUSE</p>
                         </div>
                     </div>
@@ -924,6 +924,12 @@ img, canvas, svg { max-width: 100%; height: auto; }
                                 <button id="addStudentBtn" type="button" onclick="addNewStudent()" class="!inline-flex !visible bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm px-5 py-2.5 rounded-xl transition items-center gap-2 shadow-md" title="Add a new student to the selected class"><i class="fa-solid fa-user-plus"></i> Add New Student</button>
                             </div>
                         </div>
+                        <div class="mb-4 flex flex-wrap items-center gap-2">
+                            <button id="addStudentQuickBtn" type="button" onclick="addNewStudent()" class="bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-sm px-5 py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2 w-full sm:w-auto">
+                                <i class="fa-solid fa-user-plus"></i> Add New Student
+                            </button>
+                            <span class="text-xs text-gray-500">Add a new student to the selected class.</span>
+                        </div>
                         <div id="studentsLoadHint" class="text-xs text-gray-500 mb-4">Select a class above and press <b>Load Full Class List</b> (or search) to view students — this keeps the page fast.</div>
                         <div class="mt-3 mb-4 p-3 rounded-xl border border-blue-100 bg-blue-50 flex flex-wrap items-center gap-2 admin-only" id="studentPromotionControls">
                             <span class="text-xs font-bold text-blue-900"><i class="fa-solid fa-arrow-up-right-dots mr-1"></i> Promote Students</span>
@@ -1022,7 +1028,7 @@ img, canvas, svg { max-width: 100%; height: auto; }
                         <div id="teacherDetailPanel" class="hidden bg-white border border-gray-200 rounded-2xl p-4"></div>
                     </div>
 
-                    <!-- SUBJECTS TAB --> -->
+                    <!-- SUBJECTS TAB -->
                     <div id="tab-subjects" class="tab-content hidden">
                         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                             <h3 class="font-bold text-gray-800"><i class="fa-solid fa-book mr-2"></i> Subject Management</h3>
@@ -1403,6 +1409,7 @@ img, canvas, svg { max-width: 100%; height: auto; }
                                     <button onclick="exportData()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-2.5 rounded-xl transition flex items-center justify-center gap-2 admin-only"><i class="fa-solid fa-download"></i> Export All Data</button>
                                     <button onclick="importData()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold text-sm py-2.5 rounded-xl transition flex items-center justify-center gap-2 admin-only"><i class="fa-solid fa-upload"></i> Import Data</button>
                                     <button onclick="openBackupRestore()" class="w-full backup-green-btn bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm py-2.5 rounded-xl transition flex items-center justify-center gap-2 admin-only"><i class="fa-solid fa-clock-rotate-left"></i> Backup History & Restore</button>
+                                    <button onclick="openFullSchoolWipe()" class="w-full bg-red-700 hover:bg-red-800 text-white font-bold text-sm py-2.5 rounded-xl transition flex items-center justify-center gap-2 admin-only"><i class="fa-solid fa-broom"></i> Wipe All School Data</button>
                                     <button onclick="openArchiveCenter()" class="w-full bg-orange-600 hover:bg-orange-700 text-white font-bold text-sm py-2.5 rounded-xl transition flex items-center justify-center gap-2 admin-only"><i class="fa-solid fa-box-archive"></i> Archive Center (Attendance / Exams / Fees)</button>
                                 </div>
                             </div>
@@ -2760,12 +2767,25 @@ async function saveArchiveFast_(items, label='archive') {
                 ['exam',examRows.map(r=>r.id)],
                 ['notice',noticeRows.map(r=>r.id)]
             ];
+            // Chunk deleted-record ID lookups as well. A single query containing all
+            // student IDs can exceed mobile browser/server URL limits when the school
+            // has thousands of students, which would abort the whole login load.
             const deletedIndexBatches=await Promise.all(deletedSpecs.map(async ([type,ids])=>{
                 const clean=[...new Set((ids||[]).map(String).filter(Boolean))];
                 if(!clean.length) return [];
-                const encoded=clean.map(v=>encodeURIComponent(v)).join(',');
-                const q=`?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&record_type=eq.${encodeURIComponent(type)}&record_id=in.(${encoded})&select=record_type,record_id&limit=1000`;
-                return supabaseTableRequest('deleted_records',{query:q});
+                const CHUNK=120, CONCURRENCY=4, batches=[];
+                for(let i=0;i<clean.length;i+=CHUNK) batches.push(clean.slice(i,i+CHUNK));
+                const rows=[];
+                for(let start=0;start<batches.length;start+=CONCURRENCY){
+                    const group=await Promise.all(batches.slice(start,start+CONCURRENCY).map(async chunk=>{
+                        const encoded=chunk.map(v=>encodeURIComponent(v)).join(',');
+                        const q=`?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&record_type=eq.${encodeURIComponent(type)}&record_id=in.(${encoded})&select=record_type,record_id&limit=1000`;
+                        const out=await supabaseTableRequest('deleted_records',{query:q});
+                        return Array.isArray(out) ? out : [];
+                    }));
+                    group.forEach(batch=>rows.push(...batch));
+                }
+                return rows;
             }));
             const deletedIndexRows=deletedIndexBatches.flat().filter(Array.isArray).flat();
             const deletedKeySet=new Set((deletedIndexRows||[]).map(r=>`${String(r.record_type||'')}::${String(r.record_id||'')}`));
@@ -3519,7 +3539,7 @@ async function saveArchiveFast_(items, label='archive') {
             const resultRows=h.exams.map(e=>`<tr><td>${esc(e.name)}</td><td>${esc(e.class_name)}</td><td>${esc(e.subject)}</td><td>${esc(e.exam_date)}</td><td>${esc(h.results[String(e.id)]??'—')} / ${esc(e.total_marks||100)}</td></tr>`).join('')||'<tr><td colspan="5">No exam results.</td></tr>';
             const feeRows=h.fees.map(f=>`<tr><td>${esc(f.month||f.payment_date||'')}</td><td>${esc(f.class_name||'')}</td><td>${esc(f.fee_amount||0)}</td><td>${esc(f.paid_amount||0)}</td><td>${esc(f.status||'')}</td></tr>`).join('')||'<tr><td colspan="5">No fee records.</td></tr>';
             const promotionRows=h.promotions.map(p=>`<tr><td>${esc(p.from_class)}</td><td>${esc(p.to_class)}</td><td>${esc(p.academic_year||'')}</td><td>${p.promoted_at?esc(new Date(p.promoted_at).toLocaleDateString()):''}</td></tr>`).join('')||'<tr><td colspan="4">No promotion history.</td></tr>';
-            const page=`<div class="report-page">${reportPrintHeader('Archived Student Complete History')}<div class="custom-report-meta"><span><b>Name:</b> ${esc(h.student?.name||item.name)}</span><span><b>Father:</b> ${esc(h.student?.father||item.father)}</span><span><b>Last Class:</b> ${esc(h.student?.class_name||item.className)}</span><span><b>Roll:</b> ${esc(h.student?.roll_no||item.rollNo)}</span><span><b>Leaving Date:</b> ${esc(h.student?.leaving_date||item.leavingDate)}</span></div><h3>Fees</h3><table class="custom-report-table"><thead><tr><th>Month/Date</th><th>Class</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${feeRows}</tbody></table><p><b>Total:</b> ${feeTotal} &nbsp; <b>Paid:</b> ${feePaid} &nbsp; <b>Balance:</b> ${feeTotal-feePaid}</p><h3>Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Class</th><th>Subject</th><th>Date</th><th>Result</th></tr></thead><tbody>${resultRows}</tbody></table><h3>Attendance</h3><p>Total attendance records: ${h.attendance.length}</p><h3>Promotion History</h3><table class="custom-report-table"><thead><tr><th>From</th><th>To</th><th>Academic Year</th><th>Date</th></tr></thead><tbody>${promotionRows}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+            const page=`<div class="report-page">${reportPrintHeader('Archived Student Complete History')}<div class="custom-report-meta"><span><b>Name:</b> ${esc(h.student?.name||item.name)}</span><span><b>Father:</b> ${esc(h.student?.father||item.father)}</span><span><b>Last Class:</b> ${esc(h.student?.class_name||item.className)}</span><span><b>Roll:</b> ${esc(h.student?.roll_no||item.rollNo)}</span><span><b>Leaving Date:</b> ${esc(h.student?.leaving_date||item.leavingDate)}</span></div><h3>Fees</h3><table class="custom-report-table"><thead><tr><th>Month/Date</th><th>Class</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${feeRows}</tbody></table><p><b>Total:</b> ${feeTotal} &nbsp; <b>Paid:</b> ${feePaid} &nbsp; <b>Balance:</b> ${feeTotal-feePaid}</p><h3>Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Class</th><th>Subject</th><th>Date</th><th>Result</th></tr></thead><tbody>${resultRows}</tbody></table><h3>Attendance</h3><p>Total attendance records: ${h.attendance.length}</p><h3>Promotion History</h3><table class="custom-report-table"><thead><tr><th>From</th><th>To</th><th>Academic Year</th><th>Date</th></tr></thead><tbody>${promotionRows}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
             printHTML(page);
         } catch(e) { showToast('❌ History load failed: '+(e.message||e),'error'); }
     }
@@ -3560,7 +3580,7 @@ async function saveArchiveFast_(items, label='archive') {
         const cls=document.getElementById('archiveManagerClass')?.value||'All';
         let rows=studentArchiveCache_.slice(); if(cls!=='All') rows=rows.filter(x=>String(x.archivedFromClass||x.className||'')===String(cls));
         const tr=rows.map(x=>`<tr><td>${escapeHtmlBackup_(x.name)}</td><td>${escapeHtmlBackup_(x.father)}</td><td>${escapeHtmlBackup_(x.archivedFromClass||x.className)}</td><td>${escapeHtmlBackup_(x.rollNo)}</td><td>${escapeHtmlBackup_(x.leavingDate)}</td><td>${x.archivedAt?new Date(x.archivedAt).toLocaleDateString():''}</td></tr>`).join('')||'<tr><td colspan="6">No archived students.</td></tr>';
-        printHTML(`<div class="report-page">${reportPrintHeader(`Student Archive — ${cls==='All'?'All Classes':'Class '+cls}`)}<table class="custom-report-table"><thead><tr><th>Student</th><th>Father</th><th>Last Class</th><th>Roll</th><th>Leaving Date</th><th>Archived On</th></tr></thead><tbody>${tr}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`);
+        printHTML(`<div class="report-page">${reportPrintHeader(`Student Archive — ${cls==='All'?'All Classes':'Class '+cls}`)}<table class="custom-report-table"><thead><tr><th>Student</th><th>Father</th><th>Last Class</th><th>Roll</th><th>Leaving Date</th><th>Archived On</th></tr></thead><tbody>${tr}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`);
     }
 
     // ==================== STUDENT CLASS PROMOTION ====================
@@ -3926,7 +3946,7 @@ async function saveArchiveFast_(items, label='archive') {
         if (!rows.length) { showToast('No archived promotion records to print.', 'warning'); return; }
         const esc = escapeHtmlBackup_;
         const tr = rows.map(x => `<tr><td>${esc(x.studentName||'N/A')}</td><td>${esc(x.fromClass||'N/A')}</td><td>${esc(x.toClass||'N/A')}</td><td>${esc(x.oldRoll||'N/A')} → ${esc(x.newRoll||'N/A')}</td><td>${x.promotedAt?new Date(x.promotedAt).toLocaleDateString():'N/A'}</td><td>${x.archivedAt?new Date(x.archivedAt).toLocaleDateString():'N/A'}</td></tr>`).join('');
-        printHTML(`<div class="report-page">${reportPrintHeader(`Promotion History Archive — ${scope==='selected'?'Selected':'All'} (${rows.length})`)}<table class="custom-report-table"><thead><tr><th>Student</th><th>From</th><th>To</th><th>Roll</th><th>Promotion Date</th><th>Archived On</th></tr></thead><tbody>${tr}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`);
+        printHTML(`<div class="report-page">${reportPrintHeader(`Promotion History Archive — ${scope==='selected'?'Selected':'All'} (${rows.length})`)}<table class="custom-report-table"><thead><tr><th>Student</th><th>From</th><th>To</th><th>Roll</th><th>Promotion Date</th><th>Archived On</th></tr></thead><tbody>${tr}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`);
     }
 
     async function viewArchivedPromotionHistory(archiveId) {
@@ -3938,7 +3958,7 @@ async function saveArchiveFast_(items, label='archive') {
             const feeRows = h.fees.map(f => `<tr><td>${esc(f.month||f.payment_date||'')}</td><td>${esc(f.class_name||'')}</td><td>${esc(f.fee_amount||0)}</td><td>${esc(f.paid_amount||0)}</td><td>${esc(f.status||'')}</td></tr>`).join('') || '<tr><td colspan="5">No fee records.</td></tr>';
             const resultRows = h.exams.map(e => `<tr><td>${esc(e.name||'')}</td><td>${esc(e.class_name||'')}</td><td>${esc(e.subject||'')}</td><td>${esc(e.exam_date||'')}</td><td>${esc(h.results[String(e.id)] ?? '—')} / ${esc(e.total_marks||100)}</td></tr>`).join('') || '<tr><td colspan="5">No exam results.</td></tr>';
             const attendanceRows = h.attendance.map(a => `<tr><td>${esc(a.attendance_date||'')}</td><td>${esc(a.status||'')}</td></tr>`).join('') || '<tr><td colspan="2">No attendance records.</td></tr>';
-            const page = `<div class="report-page">${reportPrintHeader('Archived Promotion History — Student Complete History')}<div class="custom-report-meta"><span><b>Name:</b> ${esc(item.studentName||h.student?.name)}</span><span><b>Previous Class:</b> ${esc(item.fromClass||item.previousClassData?.className)}</span><span><b>Promoted To:</b> ${esc(item.toClass)}</span><span><b>Promotion Date:</b> ${esc(item.promotedAt||'')}</span></div><h3>Fees</h3><table class="custom-report-table"><thead><tr><th>Month/Date</th><th>Class</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${feeRows}</tbody></table><h3>Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Class</th><th>Subject</th><th>Date</th><th>Result</th></tr></thead><tbody>${resultRows}</tbody></table><h3>Attendance</h3><table class="custom-report-table"><thead><tr><th>Date</th><th>Status</th></tr></thead><tbody>${attendanceRows}</tbody></table><h3>Promotion</h3><p>Previous class: ${esc(item.fromClass||'')} → ${esc(item.toClass||'')}</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+            const page = `<div class="report-page">${reportPrintHeader('Archived Promotion History — Student Complete History')}<div class="custom-report-meta"><span><b>Name:</b> ${esc(item.studentName||h.student?.name)}</span><span><b>Previous Class:</b> ${esc(item.fromClass||item.previousClassData?.className)}</span><span><b>Promoted To:</b> ${esc(item.toClass)}</span><span><b>Promotion Date:</b> ${esc(item.promotedAt||'')}</span></div><h3>Fees</h3><table class="custom-report-table"><thead><tr><th>Month/Date</th><th>Class</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${feeRows}</tbody></table><h3>Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Class</th><th>Subject</th><th>Date</th><th>Result</th></tr></thead><tbody>${resultRows}</tbody></table><h3>Attendance</h3><table class="custom-report-table"><thead><tr><th>Date</th><th>Status</th></tr></thead><tbody>${attendanceRows}</tbody></table><h3>Promotion</h3><p>Previous class: ${esc(item.fromClass||'')} → ${esc(item.toClass||'')}</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
             printHTML(page);
         } catch (e) { showToast('❌ Archived promotion history load failed: ' + (e.message || e), 'error'); }
     }
@@ -4154,7 +4174,7 @@ async function saveArchiveFast_(items, label='archive') {
                 <thead><tr><th>Student</th><th>From</th><th>To</th><th>Roll (Old → New)</th><th>Promotion Date</th><th>Status</th></tr></thead>
                 <tbody>${tr}</tbody>
             </table>
-            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
         printHTML(page);
     }
@@ -4243,7 +4263,6 @@ async function saveArchiveFast_(items, label='archive') {
 
 
     function openStudentAddModal() {
-        if (currentUser?.role === 'Teacher') { showToast('Only admin can add students', 'error'); return; }
         const cls = document.getElementById('classSelect')?.value || 'PG';
         const modal = document.getElementById('studentAddModal');
         if (!modal) return;
@@ -4275,7 +4294,6 @@ async function saveArchiveFast_(items, label='archive') {
     }
 
     async function saveNewStudentFromModal() {
-        if (currentUser?.role === 'Teacher') { showToast('Only admin can add students', 'error'); return; }
         const nameEl=document.getElementById('addStudentName');
         const fatherEl=document.getElementById('addStudentFather');
         const genderEl=document.getElementById('addStudentGender');
@@ -5151,7 +5169,7 @@ async function saveArchiveFast_(items, label='archive') {
         return `<div class="report-page">
             <div class="report-header">
                 <h1>🏫 THE EDUCATORS SCHOOL</h1>
-                <h2>Ahmd Haseeb Campus</h2>
+                <h2>Ahmad Haseeb Campus</h2>
                 <h3>Monthly Attendance Report — ${monthInfo.monthLabel}</h3>
             </div>
             <div class="report-info-grid">
@@ -5175,7 +5193,7 @@ async function saveArchiveFast_(items, label='archive') {
                 <div class="sig"><div class="sig-line">Class Teacher</div></div>
                 <div class="sig"><div class="sig-line">Principal</div></div>
             </div>
-            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
     }
 
@@ -5205,7 +5223,7 @@ async function saveArchiveFast_(items, label='archive') {
         return `<div class="report-page">
             <div class="report-header">
                 <h1>🏫 THE EDUCATORS SCHOOL</h1>
-                <h2>Ahmd Haseeb Campus</h2>
+                <h2>Ahmad Haseeb Campus</h2>
                 <h3>Class Attendance Report — ${className}</h3>
             </div>
             <div class="report-info-grid">
@@ -5228,7 +5246,7 @@ async function saveArchiveFast_(items, label='archive') {
                 <div class="sig"><div class="sig-line">Class Teacher</div></div>
                 <div class="sig"><div class="sig-line">Principal</div></div>
             </div>
-            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
     }
 
@@ -5476,7 +5494,7 @@ async function saveArchiveFast_(items, label='archive') {
             rows += `<tr><td>${student.rollNo || 'N/A'}</td><td style="text-align:left;">${student.name}</td><td>${obtained}</td><td>${pct}%</td><td style="font-weight:bold;">${grade.label}</td></tr>`;
         });
         const avg = students.length ? ((sumObtained / students.length / total) * 100).toFixed(1) : 0;
-        return `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div><div><b>Class Average:</b> ${avg}%</div></div><table class="report-table"><thead><tr><th>Roll #</th><th style="text-align:left;">Name</th><th>Obtained</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
+        return `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div><div><b>Class Average:</b> ${avg}%</div></div><table class="report-table"><thead><tr><th>Roll #</th><th style="text-align:left;">Name</th><th>Obtained</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
     }
 
     function addNewExam() { document.getElementById('examModal').classList.remove('hidden'); document.body.style.overflow = 'hidden'; document.getElementById('examName').value = ''; document.getElementById('examSubject').value = ''; document.getElementById('examTotalMarks').value = 100; document.getElementById('examPassing').value = 40; document.getElementById('examDate').value = new Date().toISOString().split('T')[0]; }
@@ -5964,7 +5982,7 @@ ${lines}
                 });
                 const overallPct = sumTotal > 0 ? ((sumObtained / sumTotal) * 100).toFixed(1) : 0;
                 const overallGrade = getGrade(overallPct);
-                pages += `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Overall Result Card</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${className}</div><div><b>Class Teacher:</b> ${getClassTeacherName(className)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Tests Included:</b> ${selected.length}</div></div><table class="report-table"><thead><tr><th style="text-align:left;">Subject</th><th style="text-align:left;">Exam</th><th>Date</th><th>Obtained</th><th>Total</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><p><b>Overall Result:</b> ${overallPct}% &nbsp; <b>Grade:</b> ${overallGrade.label}</p></div>`;
+                pages += `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Overall Result Card</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${className}</div><div><b>Class Teacher:</b> ${getClassTeacherName(className)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Tests Included:</b> ${selected.length}</div></div><table class="report-table"><thead><tr><th style="text-align:left;">Subject</th><th style="text-align:left;">Exam</th><th>Date</th><th>Obtained</th><th>Total</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><p><b>Overall Result:</b> ${overallPct}% &nbsp; <b>Grade:</b> ${overallGrade.label}</p></div>`;
             });
             printHTML(pages);
             return;
@@ -5977,7 +5995,7 @@ ${lines}
         const overallGrade = getGrade(overallPct);
         const page = `
             <div class="report-page">
-                <div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Overall Result Card</h3></div>
+                <div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Overall Result Card</h3></div>
                 <div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${className}</div><div><b>Class Teacher:</b> ${getClassTeacherName(className)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Tests Included:</b> ${selected.length}</div></div>
                 <table class="report-table"><thead><tr><th style="text-align:left;">Subject</th><th style="text-align:left;">Exam</th><th>Date</th><th>Obtained</th><th>Total</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table>
                 <div class="report-info-grid" style="margin-top:14px;"><div><b>Total Obtained:</b> ${sumObtained} / ${sumTotal}</div><div><b>Overall Percentage:</b> ${overallPct}%</div><div><b>Overall Grade:</b> <span style="color:${overallGrade.color.replace('text-', '')};font-weight:bold;">${overallGrade.label}</span></div></div>
@@ -6102,13 +6120,24 @@ ${lines}
         }
         const studentStatus = String(student.feeStatus || '').toLowerCase();
         if (studentStatus === 'paid') return 'Paid';
-        if (studentStatus === 'unpaid' || studentStatus === 'partial') return 'Unpaid';
-        return 'Pending';
+        return 'Unpaid';
     }
 
-    function printFeeStudentsByStatus() {
+    async function printFeeStudentsByStatus() {
         if (currentUser?.role === 'Teacher') {
             showToast('Only admin can print fee records', 'error');
+            return;
+        }
+        // If the background fee sync is still running, wait for it so the print
+        // report never races the lazy-loading phase. If no fee data is present,
+        // perform the normal on-demand historical fee load.
+        try {
+            if (historicalFeesResultsLoading_) await historicalFeesResultsLoading_;
+            const hasFeeData=Array.isArray(db.fees) && db.fees.length>0;
+            if (databaseLoadedFromSupabase) await ensureHistoricalFeesResultsLoaded_();
+        } catch(error) {
+            console.error('Fee status print sync failed:',error);
+            showToast('⚠️ Fee data is still syncing. Please try Print again.', 'warning');
             return;
         }
         const selectedStatus = document.getElementById('feeStudentPrintStatus')?.value || 'Paid';
@@ -6122,7 +6151,8 @@ ${lines}
                     const amount = record ? feeAmountValue(record) : 0;
                     const paid = record ? feePaidValue(record) : 0;
                     const due = record ? feeDueValue(record) : 0;
-                    students.push({ student, className, record, amount, paid, due });
+                    const paidDate = record ? (record.paymentDate || record.date || '') : '';
+                    students.push({ student, className, record, amount, paid, due, paidDate });
                 }
             });
         });
@@ -6130,7 +6160,7 @@ ${lines}
             showToast(`No ${selectedStatus.toLowerCase()} students found`, 'warning');
             return;
         }
-        const rows = students.map(({student, className, record, amount, paid, due}) => `<tr>
+        const rows = students.map(({student, className, record, amount, paid, due, paidDate}) => `<tr>
             <td>${escFee(student.name || '')}</td>
             <td>${escFee(student.rollNo || '')}</td>
             <td>${escFee(className)}</td>
@@ -6140,6 +6170,7 @@ ${lines}
             <td>₨ ${paid.toLocaleString()}</td>
             <td>₨ ${due.toLocaleString()}</td>
             <td>${escFee(selectedStatus)}</td>
+            <td>${escFee(paidDate || '—')}</td>
         </tr>`).join('');
         const totalFee = students.reduce((n, x) => n + x.amount, 0);
         const totalPaid = students.reduce((n, x) => n + x.paid, 0);
@@ -6147,7 +6178,7 @@ ${lines}
         const page = `<div class="report-page">
             <div class="report-header">
                 <h1>🏫 THE EDUCATORS SCHOOL</h1>
-                <h2>Ahmd Haseeb Campus</h2>
+                <h2>Ahmad Haseeb Campus</h2>
                 <h3>${escFee(selectedStatus)} Students Fee Report</h3>
                 <p>Generated: ${escFee(new Date().toLocaleString())}</p>
             </div>
@@ -6160,9 +6191,9 @@ ${lines}
                 <div><b>Total Due:</b> ₨ ${totalDue.toLocaleString()}</div>
             </div>
             <table class="report-table"><thead><tr>
-                <th>Student</th><th>Roll #</th><th>Class</th><th>Father / Guardian</th><th>Month</th><th>Fee</th><th>Paid</th><th>Due</th><th>Status</th>
+                <th>Student</th><th>Roll #</th><th>Class</th><th>Father / Guardian</th><th>Month</th><th>Fee</th><th>Paid</th><th>Due</th><th>Status</th><th>Paid Date</th>
             </tr></thead><tbody>${rows}</tbody></table>
-            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
         printHTML(page);
     }
@@ -6222,7 +6253,7 @@ ${lines}
         const page = `<div class="report-page">
             <div class="report-header">
                 <h1>🏫 THE EDUCATORS SCHOOL</h1>
-                <h2>Ahmd Haseeb Campus</h2>
+                <h2>Ahmad Haseeb Campus</h2>
                 <h3>${escFee(title)}</h3>
                 <p>Generated: ${escFee(new Date().toLocaleString())}</p>
             </div>
@@ -6238,7 +6269,7 @@ ${lines}
                 </tr></thead>
                 <tbody>${rows}</tbody>
             </table>
-            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
         printHTML(page);
     }
@@ -6278,13 +6309,38 @@ ${lines}
     // falling back to whichever student happens to be first in the dropdown.
     let currentFeeLookupStudent_ = null;
 
+    function normalizeFeeMonthKey_(value) {
+        const raw=String(value||'').trim();
+        if(!raw) return '';
+        const direct=FEE_MONTHS.find(m=>m.toLowerCase()===raw.toLowerCase());
+        if(direct) return direct;
+        const ym=raw.match(/^(\d{4})-(\d{1,2})$/);
+        if(ym){ const idx=Number(ym[2])-1; if(idx>=0 && idx<12) return FEE_MONTHS[idx]; }
+        const slash=raw.match(/^(\d{1,2})[\/-](?:\d{4})$/);
+        if(slash){ const idx=Number(slash[1])-1; if(idx>=0 && idx<12) return FEE_MONTHS[idx]; }
+        return raw.toLowerCase();
+    }
+
+    function feeAcademicYearKey_(value, monthValue) {
+        const raw=String(value||'').trim();
+        if(raw) return raw;
+        const m=String(monthValue||'').trim().match(/^(\d{4})-(\d{1,2})$/);
+        if(m){ const y=Number(m[1]); return `${y}-${String(y+1).slice(-2)}`; }
+        return '';
+    }
+
     function getStudentMonthFeeRecord_(className, studentId, month, academicYear) {
-        const records=(db.fees||[]).filter(f=>
-            String(f.studentId||f.student_id||'')===String(studentId) &&
-            String(f.class||f.className||'')===String(className) &&
-            String(f.month||'')===String(month||'') &&
-            String(f.academicYear||f.academic_year||'')===String(academicYear||'')
-        );
+        const targetMonth=normalizeFeeMonthKey_(month);
+        const targetYear=String(academicYear||'').trim();
+        const records=(db.fees||[]).filter(f=>{
+            if(String(f.studentId||f.student_id||'')!==String(studentId)) return false;
+            if(String(f.class||f.className||'')!==String(className)) return false;
+            if(normalizeFeeMonthKey_(f.month)!==targetMonth) return false;
+            const rawYear=String(f.academicYear||f.academic_year||'').trim();
+            const recordYear=feeAcademicYearKey_(rawYear,f.month);
+            if(recordYear && targetYear && recordYear!==targetYear) return false;
+            return !targetYear || !recordYear || recordYear===targetYear;
+        });
         if(!records.length) return null;
         return records.slice().sort((a,b)=>{
             const ak=String(a.paymentDate||a.date||'')+'|'+String(a.id||'');
@@ -6294,12 +6350,17 @@ ${lines}
     }
 
     function getStudentMonthFeeRecords_(className, studentId, month, academicYear) {
-        return (db.fees||[]).filter(f=>
-            String(f.studentId||f.student_id||'')===String(studentId) &&
-            String(f.class||f.className||'')===String(className) &&
-            String(f.month||'')===String(month||'') &&
-            String(f.academicYear||f.academic_year||'')===String(academicYear||'')
-        );
+        const targetMonth=normalizeFeeMonthKey_(month);
+        const targetYear=String(academicYear||'').trim();
+        return (db.fees||[]).filter(f=>{
+            if(String(f.studentId||f.student_id||'')!==String(studentId)) return false;
+            if(String(f.class||f.className||'')!==String(className)) return false;
+            if(normalizeFeeMonthKey_(f.month)!==targetMonth) return false;
+            const rawYear=String(f.academicYear||f.academic_year||'').trim();
+            const recordYear=feeAcademicYearKey_(rawYear,f.month);
+            if(recordYear && targetYear && recordYear!==targetYear) return false;
+            return !targetYear || !recordYear || recordYear===targetYear;
+        });
     }
 
     function showStudentFeeSummary_(className,studentId) {
@@ -6514,7 +6575,7 @@ ${lines}
     }
 
     async function deleteFee(id){ if(currentUser?.role==='Teacher'){showToast('Only admin can delete fee records','error');return;} if(!confirm('Delete this fee record? It will move to trash and can be restored.'))return; const f=(db.fees||[]).find(x=>x.id===id); if(!f)return; db.deleted=db.deleted||[]; const trashItem={id:f.id,type:'fee',name:`${f.studentName} - ${f.month}`,details:`Class: ${f.class}, Fee: ₨ ${feeAmountValue(f)}, Paid: ₨ ${feePaidValue(f)}, Due: ₨ ${feeDueValue(f)}`,deletedDate:new Date().toLocaleString(),data:f,className:f.class}; db.deleted.push(trashItem); db.fees=db.fees.filter(x=>x.id!==id); loadFees();loadDeletedItems(); refreshFeeLookupIfShowing_(f.class,f.studentId); try{await queueFastSave_(()=>deleteFeeFast_(f,trashItem));showToast('Fee record moved to trash','warning');}catch(e){db.fees.push(f);db.deleted=db.deleted.filter(x=>x!==trashItem);loadFees();loadDeletedItems();refreshFeeLookupIfShowing_(f.class,f.studentId);showToast('❌ Fee delete failed: '+(e.message||e),'error');} }
-    function printFeeRecord(id){ if(currentUser?.role==='Teacher'){showToast('Only admin can print fee records','error');return;} const f=(db.fees||[]).find(x=>x.id===id); if(!f){showToast('Fee record not found','error');return;} const s=getFeeStudent(f); const amount=feeAmountValue(f),paid=feePaidValue(f),due=feeDueValue(f); const page=`<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Fee Receipt</h3></div><div class="report-info-grid"><div><b>Receipt No:</b> ${escFee(f.receiptNumber||'N/A')}</div><div><b>Date:</b> ${escFee(f.paymentDate||f.date||'')}</div><div><b>Student:</b> ${escFee(f.studentName)}</div><div><b>Admission/Roll No:</b> ${escFee(f.rollNo||s?.rollNo||'')}</div><div><b>Father/Guardian:</b> ${escFee(f.fatherGuardianName||s?.father||'')}</div><div><b>Class:</b> ${escFee(f.class)}</div><div><b>Fee Month:</b> ${escFee(f.month)}</div><div><b>Fee Amount:</b> ₨ ${amount.toLocaleString()}</div><div><b>Paid:</b> ₨ ${paid.toLocaleString()}</div><div><b>Remaining:</b> ₨ ${due.toLocaleString()}</div><div><b>Status:</b> ${escFee(normalizeFeeStatus(f.status,amount,paid))}</div></div><div class="signatures"><div class="sig"><div class="sig-line">Received By</div></div><div class="sig"><div class="sig-line">Parent / Guardian</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`; printHTML(page); }
+    function printFeeRecord(id){ if(currentUser?.role==='Teacher'){showToast('Only admin can print fee records','error');return;} const f=(db.fees||[]).find(x=>x.id===id); if(!f){showToast('Fee record not found','error');return;} const s=getFeeStudent(f); const amount=feeAmountValue(f),paid=feePaidValue(f),due=feeDueValue(f); const page=`<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Fee Receipt</h3></div><div class="report-info-grid"><div><b>Receipt No:</b> ${escFee(f.receiptNumber||'N/A')}</div><div><b>Date:</b> ${escFee(f.paymentDate||f.date||'')}</div><div><b>Student:</b> ${escFee(f.studentName)}</div><div><b>Admission/Roll No:</b> ${escFee(f.rollNo||s?.rollNo||'')}</div><div><b>Father/Guardian:</b> ${escFee(f.fatherGuardianName||s?.father||'')}</div><div><b>Class:</b> ${escFee(f.class)}</div><div><b>Fee Month:</b> ${escFee(f.month)}</div><div><b>Fee Amount:</b> ₨ ${amount.toLocaleString()}</div><div><b>Paid:</b> ₨ ${paid.toLocaleString()}</div><div><b>Remaining:</b> ₨ ${due.toLocaleString()}</div><div><b>Status:</b> ${escFee(normalizeFeeStatus(f.status,amount,paid))}</div></div><div class="signatures"><div class="sig"><div class="sig-line">Received By</div></div><div class="sig"><div class="sig-line">Parent / Guardian</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`; printHTML(page); }
 
     // ==================== DELETED ITEMS ====================
     function getHiddenDeletedItemIds_() {
@@ -7082,7 +7143,7 @@ ${lines}
         const overallGrade = getGrade(overallPct);
         const totalDays = (student.present || 0) + (student.absences || 0) || 1;
         const attendancePercent = Math.round(((student.present || 0) / totalDays) * 100);
-        return `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Student Academic Report</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${className}</div><div><b>Class Teacher:</b> ${getClassTeacherName(className)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Gender:</b> ${student.gender || 'N/A'}</div><div><b>Date of Birth:</b> ${student.dob || 'N/A'}</div><div><b>Father's Name:</b> ${student.father || 'N/A'}</div><div><b>Contact:</b> ${student.contact || 'N/A'}</div><div><b>WhatsApp:</b> ${student.whatsapp || 'N/A'}</div><div><b>Blood Group:</b> ${student.bloodGroup || 'N/A'}</div><div><b>Address:</b> ${student.address || 'N/A'}</div><div><b>Attendance:</b> ${attendancePercent}% (${student.present || 0} present / ${student.absences || 0} absent)</div></div><table class="report-table"><thead><tr><th style="text-align:left;">Test / Exam</th><th style="text-align:left;">Subject</th><th>Test Date</th><th>Total Marks</th><th>Obtained Marks</th><th>Percentage</th><th>Grade</th></tr></thead><tbody>${marksHTML || '<tr><td colspan="7">No test results found.</td></tr>'}<tr style="background:#eff6ff;font-weight:bold;"><td colspan="3" style="text-align:right;">Grand Total:</td><td>${grandTotal}</td><td>${grandObtained}</td><td>${overallPct}%</td><td style="color:${overallGrade.color.replace('text-', '')}">${overallGrade.label}</td></tr></tbody></table><div style="margin-bottom:15px;"><span style="font-weight:bold;">Fee Status: </span><span class="fee-status ${student.feeStatus === 'Paid' ? 'fee-paid' : student.feeStatus === 'Partial' ? 'fee-partial' : 'fee-pending'}">${student.feeStatus || 'Pending'}</span></div><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div></div>`;
+        return `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Student Academic Report</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${className}</div><div><b>Class Teacher:</b> ${getClassTeacherName(className)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Gender:</b> ${student.gender || 'N/A'}</div><div><b>Date of Birth:</b> ${student.dob || 'N/A'}</div><div><b>Father's Name:</b> ${student.father || 'N/A'}</div><div><b>Contact:</b> ${student.contact || 'N/A'}</div><div><b>WhatsApp:</b> ${student.whatsapp || 'N/A'}</div><div><b>Blood Group:</b> ${student.bloodGroup || 'N/A'}</div><div><b>Address:</b> ${student.address || 'N/A'}</div><div><b>Attendance:</b> ${attendancePercent}% (${student.present || 0} present / ${student.absences || 0} absent)</div></div><table class="report-table"><thead><tr><th style="text-align:left;">Test / Exam</th><th style="text-align:left;">Subject</th><th>Test Date</th><th>Total Marks</th><th>Obtained Marks</th><th>Percentage</th><th>Grade</th></tr></thead><tbody>${marksHTML || '<tr><td colspan="7">No test results found.</td></tr>'}<tr style="background:#eff6ff;font-weight:bold;"><td colspan="3" style="text-align:right;">Grand Total:</td><td>${grandTotal}</td><td>${grandObtained}</td><td>${overallPct}%</td><td style="color:${overallGrade.color.replace('text-', '')}">${overallGrade.label}</td></tr></tbody></table><div style="margin-bottom:15px;"><span style="font-weight:bold;">Fee Status: </span><span class="fee-status ${student.feeStatus === 'Paid' ? 'fee-paid' : student.feeStatus === 'Partial' ? 'fee-partial' : 'fee-pending'}">${student.feeStatus || 'Pending'}</span></div><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div></div>`;
     }
 
 function printLeavingCertificate(className, studentId) {
@@ -7090,7 +7151,7 @@ function printLeavingCertificate(className, studentId) {
         const student = db.students[className]?.find(s => s.id === studentId);
         if (!student) { showToast('Student not found!', 'error'); return; }
         const today = new Date().toLocaleDateString();
-        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>School Leaving Certificate</h3></div>
+        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>School Leaving Certificate</h3></div>
             <p style="margin:18px 0;font-size:14px;line-height:1.9;">
                 This is to certify that <b>${student.name || 'N/A'}</b>, S/D/O <b>${student.father || 'N/A'}</b>,
                 bearing Roll Number <b>${student.rollNo || 'N/A'}</b>, was a bonafide student of Class
@@ -7177,7 +7238,7 @@ async function printPreviousPromotionData(index) {
         const row = (label, value) => `<div><b>${esc(label)}:</b> ${esc(value || 'N/A')}</div>`;
         let content = `
             <div class="report-page">
-              <div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>${advanced ? 'Advanced Student Information' : 'Student Information'}</h3></div>
+              <div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>${advanced ? 'Advanced Student Information' : 'Student Information'}</h3></div>
               <div class="report-info-grid">
                 ${row('Student Name', student.name)}
                 ${row('Father / Guardian', student.father)}
@@ -7226,7 +7287,7 @@ async function printPreviousPromotionData(index) {
                 ${row('Notes', ax.notes)}
               </div>`;
         }
-        content += `<div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        content += `<div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
         printHTML(content);
     }
 
@@ -7250,7 +7311,7 @@ async function printPreviousPromotionData(index) {
         if (currentUser && currentUser.role === 'Teacher') { showToast('Only admin can print teacher profiles', 'error'); return; }
         const teacher = db.teachers.find(t => t.id === teacherId);
         if (!teacher) { showToast('Teacher not found!', 'error'); return; }
-        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Teacher Profile</h3></div><div class="report-info-grid"><div><b>Name:</b> ${teacher.name}</div><div><b>Qualification:</b> ${teacher.qualification || 'N/A'}</div><div><b>Subject:</b> ${teacher.subject}</div><div><b>Class:</b> ${teacher.class}</div><div><b>Experience:</b> ${teacher.experience || 0} years</div><div><b>Contact:</b> ${teacher.contact || 'N/A'}</div><div><b>Joining Date:</b> ${teacher.joiningDate || 'N/A'}</div><div><b>Status:</b> ${teacher.teacherStatus || (teacher.status === 'Left' ? 'Left' : 'Present')}</div><div style="grid-column: span 2;"><b>Address:</b> ${teacher.address || 'N/A'}</div></div><div class="signatures"><div class="sig"><div class="sig-line">Principal</div></div><div class="sig"><div class="sig-line">Admin</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Teacher Profile</h3></div><div class="report-info-grid"><div><b>Name:</b> ${teacher.name}</div><div><b>Qualification:</b> ${teacher.qualification || 'N/A'}</div><div><b>Subject:</b> ${teacher.subject}</div><div><b>Class:</b> ${teacher.class}</div><div><b>Experience:</b> ${teacher.experience || 0} years</div><div><b>Contact:</b> ${teacher.contact || 'N/A'}</div><div><b>Joining Date:</b> ${teacher.joiningDate || 'N/A'}</div><div><b>Status:</b> ${teacher.teacherStatus || (teacher.status === 'Left' ? 'Left' : 'Present')}</div><div style="grid-column: span 2;"><b>Address:</b> ${teacher.address || 'N/A'}</div></div><div class="signatures"><div class="sig"><div class="sig-line">Principal</div></div><div class="sig"><div class="sig-line">Admin</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
         printHTML(page);
     }
 
@@ -7261,7 +7322,7 @@ async function printPreviousPromotionData(index) {
         const ax = teacher.extraData || {};
         const esc = v => String(v ?? 'N/A').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
         const row = (label, value) => `<div><b>${esc(label)}:</b> ${esc(value || 'N/A')}</div>`;
-        let content = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>${advanced ? 'Advanced Teacher Information' : 'Teacher Information'}</h3></div><div class="report-info-grid">
+        let content = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>${advanced ? 'Advanced Teacher Information' : 'Teacher Information'}</h3></div><div class="report-info-grid">
             ${row('Teacher Name', teacher.name)} ${row('Qualification', teacher.qualification)} ${row('Subject', teacher.subject)} ${row('Class', teacher.class)}
             ${row('Experience', `${teacher.experience || 0} years`)} ${row('Contact', teacher.contact)} ${row('Joining Date', teacher.joiningDate)} ${row('Status', teacher.teacherStatus || (teacher.status === 'Left' ? 'Left' : 'Present'))}
             ${row('Address', teacher.address)}
@@ -7274,7 +7335,7 @@ async function printPreviousPromotionData(index) {
                 ${row('Previous Institution', ax.previousInstitution)} ${row('Specialization', ax.specialization)} ${row('Teacher Photo Reference', ax.teacherPhoto)} ${row('Documents', ax.documents)} ${row('Notes', ax.notes)}
             </div>`;
         }
-        content += `<div class="signatures"><div class="sig"><div class="sig-line">Principal</div></div><div class="sig"><div class="sig-line">Admin</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        content += `<div class="signatures"><div class="sig"><div class="sig-line">Principal</div></div><div class="sig"><div class="sig-line">Admin</div></div></div><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
         printHTML(content);
     }
 
@@ -7304,13 +7365,13 @@ async function printPreviousPromotionData(index) {
             const obtained = results[studentId] || 0;
             const pct = total > 0 ? ((obtained / total) * 100).toFixed(1) : 0;
             const grade = getGrade(pct);
-            const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div></div><table class="report-table"><thead><tr><th>Obtained Marks</th><th>Percentage</th><th>Grade</th></tr></thead><tbody><tr><td>${obtained}</td><td>${pct}%</td><td style="color:${grade.color.replace('text-', '')};font-weight:bold;">${grade.label}</td></tr></tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
+            const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Name:</b> ${student.name}</div><div><b>Roll Number:</b> ${student.rollNo || 'N/A'}</div><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div></div><table class="report-table"><thead><tr><th>Obtained Marks</th><th>Percentage</th><th>Grade</th></tr></thead><tbody><tr><td>${obtained}</td><td>${pct}%</td><td style="color:${grade.color.replace('text-', '')};font-weight:bold;">${grade.label}</td></tr></tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
             printHTML(page); return;
         }
         let rows = '', sumObtained = 0;
         students.forEach(student => { const obtained = results[student.id] || 0; sumObtained += obtained; const pct = total > 0 ? ((obtained / total) * 100).toFixed(1) : 0; const grade = getGrade(pct); rows += `<tr><td>${student.rollNo || 'N/A'}</td><td style="text-align:left;">${student.name}</td><td>${obtained}</td><td>${pct}%</td><td style="color:${grade.color.replace('text-', '')};font-weight:bold;">${grade.label}</td></tr>`; });
         const classAvgPct = students.length > 0 ? ((sumObtained / students.length / total) * 100).toFixed(1) : 0;
-        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div><div><b>Class Average:</b> ${classAvgPct}%</div></div><table class="report-table"><thead><tr><th>Roll #</th><th style="text-align:left;">Name</th><th>Obtained</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
+        const page = `<div class="report-page"><div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>Exam Result — ${exam.name}</h3></div><div class="report-info-grid"><div><b>Class:</b> ${exam.class}</div><div><b>Subject:</b> ${exam.subject}</div><div><b>Exam Date:</b> ${exam.date || 'N/A'}</div><div><b>Class Teacher:</b> ${getClassTeacherName(exam.class)}</div><div><b>Academic Year:</b> ${getAcademicYear()}</div><div><b>Total Marks:</b> ${total}</div><div><b>Class Average:</b> ${classAvgPct}%</div></div><table class="report-table"><thead><tr><th>Roll #</th><th style="text-align:left;">Name</th><th>Obtained</th><th>%</th><th>Grade</th></tr></thead><tbody>${rows}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div></div>`;
         printHTML(page);
     }
 
@@ -7354,27 +7415,27 @@ async function printPreviousPromotionData(index) {
         return Object.values(subjectMap);
     }
     function getClassOverallPercentage(c){const a=getClassTestSubjectData(c).reduce((x,q)=>x+Number(q.obtained||0),0),t=getClassTestSubjectData(c).reduce((x,q)=>x+Number(q.total||0),0);return t>0?((a/t)*100).toFixed(1):'0.0';}
-    function reportPrintHeader(title){return `<div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmd Haseeb Campus</h2><h3>${title}</h3></div>`;}
+    function reportPrintHeader(title){return `<div class="report-header"><h1>🏫 THE EDUCATORS SCHOOL</h1><h2>Ahmad Haseeb Campus</h2><h3>${title}</h3></div>`;}
     function reportPrintStyles(){return `<style>.custom-report-table{width:100%;border-collapse:collapse;margin-top:16px;font-size:12px}.custom-report-table th,.custom-report-table td{border:1px solid #d1d5db;padding:7px 8px;text-align:left;vertical-align:top}.custom-report-table th{background:#f3f4f6;font-weight:700;text-align:center}.custom-report-table td.center{text-align:center}.custom-report-meta{display:flex;justify-content:space-between;margin:8px 0;font-size:11px;color:#4b5563}</style>`;}
-    function buildClassContactReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td>${s.contact||''}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Class Contact List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Contact / Phone Number</th></tr></thead><tbody>${r||'<tr><td colspan="3" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;}
+    function buildClassContactReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td>${s.contact||''}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Class Contact List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Contact / Phone Number</th></tr></thead><tbody>${r||'<tr><td colspan="3" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
     function getStudentFeeTotal(s,c){let f=(db.fees||[]).filter(x=>String(x.studentId||x.student||'')===String(s.id||'')||(String(x.studentName||x.name||'')===String(s.name||'')&&String(x.class||x.className||'')===String(c)));return f.length?f.reduce((a,x)=>a+Number(x.amount||x.total||0),0):Number(s.totalFee||s.fee||0);}
-    function buildStudentFeeListReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td><td>${s.contact||''}</td><td class="center">${getStudentFeeTotal(s,c)||0}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Student Fee List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th><th>Phone Number</th><th>Total Fees</th></tr></thead><tbody>${r||'<tr><td colspan="5" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;}
-    function buildStudentBasicListReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Student Basic List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th></tr></thead><tbody>${r||'<tr><td colspan="3" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;}
-    function buildTeacherListReport(){let r=(db.teachers||[]).map((t,i)=>`<tr><td class="center">${i+1}</td><td>${t.name||''}</td><td>${t.contact||''}</td><td>${t.qualification||'N/A'}</td><td>${t.subject||''}</td><td>${t.class||''}</td><td class="center">${t.experience||0}</td><td>${t.address||''}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader('Teacher List')}<div class="custom-report-meta"><span><b>Total Teachers:</b> ${(db.teachers||[]).length}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Teacher Name</th><th>Contact / Phone</th><th>Qualification</th><th>Subject</th><th>Class</th><th>Experience (Years)</th><th>Address</th></tr></thead><tbody>${r||'<tr><td colspan="8" class="center">No teachers found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;}
+    function buildStudentFeeListReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td><td>${s.contact||''}</td><td class="center">${getStudentFeeTotal(s,c)||0}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Student Fee List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th><th>Phone Number</th><th>Total Fees</th></tr></thead><tbody>${r||'<tr><td colspan="5" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
+    function buildStudentBasicListReport(c){let r=(db.students[c]||[]).map((s,i)=>`<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader(`Student Basic List — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th></tr></thead><tbody>${r||'<tr><td colspan="3" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
+    function buildTeacherListReport(){let r=(db.teachers||[]).map((t,i)=>`<tr><td class="center">${i+1}</td><td>${t.name||''}</td><td>${t.contact||''}</td><td>${t.qualification||'N/A'}</td><td>${t.subject||''}</td><td>${t.class||''}</td><td class="center">${t.experience||0}</td><td>${t.address||''}</td></tr>`).join('');return `<div class="report-page">${reportPrintHeader('Teacher List')}<div class="custom-report-meta"><span><b>Total Teachers:</b> ${(db.teachers||[]).length}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Teacher Name</th><th>Contact / Phone</th><th>Qualification</th><th>Subject</th><th>Class</th><th>Experience (Years)</th><th>Address</th></tr></thead><tbody>${r||'<tr><td colspan="8" class="center">No teachers found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
     function buildClassPercentageReport(){
         const cs=['PG','Nursery','KG','1','2','3','4','5','6','7','8','9','10'];
         const allSubjects=[]; cs.forEach(c=>getClassTestSubjectData(c).forEach(x=>{if(!allSubjects.some(q=>q.name===x.name))allSubjects.push({name:x.name});}));
         const heads=allSubjects.map(x=>`<th>${x.name} %</th>`).join('');
         const r=cs.map((c,i)=>{const actual=getClassTestSubjectData(c),map=Object.fromEntries(actual.map(x=>[x.name,x]));return `<tr><td class="center">${i+1}</td><td class="center">${c}</td>${allSubjects.map(x=>{const q=map[x.name];return `<td class="center">${q&&q.total?((q.obtained/q.total)*100).toFixed(1)+'%':'—'}</td>`}).join('')}<td class="center">${getClassOverallPercentage(c)}%</td></tr>`;}).join('');
-        return `<div class="report-page">${reportPrintHeader('Class Percentage Report')}<div class="custom-report-meta"><span><b>Classes:</b> All Classes</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Class Name</th>${heads}<th>Overall Percentage</th></tr></thead><tbody>${r}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader('Class Percentage Report')}<div class="custom-report-meta"><span><b>Classes:</b> All Classes</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Class Name</th>${heads}<th>Overall Percentage</th></tr></thead><tbody>${r}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
     function buildStudentResultSummaryReport(c){
         const ss=db.students[c]||[], sub=getClassTestSubjectData(c).map(x=>({name:x.name,total:x.total}));
         const heads=sub.map(x=>`<th>${x.name} %</th>`).join('');
         const r=ss.map((s,i)=>{const x=getStudentResultSummaryData(s,c);return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td>${sub.map(q=>`<td class="center">${x.subjectResults[q.name]!==undefined?x.subjectResults[q.name]+'%':'—'}</td>`).join('')}<td class="center">${x.overall}%</td><td class="center"><b>${x.grade}</b></td></tr>`}).join('');
-        return `<div class="report-page">${reportPrintHeader(`Student Result Summary — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th>${heads}<th>Overall %</th><th>Grade</th></tr></thead><tbody>${r||'<tr><td colspan="20" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader(`Student Result Summary — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th>${heads}<th>Overall %</th><th>Grade</th></tr></thead><tbody>${r||'<tr><td colspan="20" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
-    function buildCompleteStudentReport(c){let r=(db.students[c]||[]).map((s,i)=>{let x=getStudentResultSummaryData(s,c),subs=x.subjects.map(q=>`${q.name}: ${Number((s.marks||{})[q.name]||0)}/${q.total}`).join(', ');return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td><td>${subs||'N/A'}</td><td>${s.father||''}</td><td class="center">${x.overall}%</td></tr>`}).join('');return `<div class="report-page">${reportPrintHeader(`Complete Student Report — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th><th>Subjects</th><th>Father Name</th><th>Total / Overall %</th></tr></thead><tbody>${r||'<tr><td colspan="6" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;}
+    function buildCompleteStudentReport(c){let r=(db.students[c]||[]).map((s,i)=>{let x=getStudentResultSummaryData(s,c),subs=x.subjects.map(q=>`${q.name}: ${Number((s.marks||{})[q.name]||0)}/${q.total}`).join(', ');return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td><td>${subs||'N/A'}</td><td>${s.father||''}</td><td class="center">${x.overall}%</td></tr>`}).join('');return `<div class="report-page">${reportPrintHeader(`Complete Student Report — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th><th>Subjects</th><th>Father Name</th><th>Total / Overall %</th></tr></thead><tbody>${r||'<tr><td colspan="6" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
     function populateReportPrintClassSelect(){let s=document.getElementById('reportPrintClassSelect');if(s)s.innerHTML=['PG','Nursery','KG','1','2','3','4','5','6','7','8','9','10'].map(c=>`<option value="${c}">Class ${c}</option>`).join('');}
     function populateReportPrintStudentSelect(){let s=document.getElementById('reportPrintStudentSelect'),c=document.getElementById('reportPrintClassSelect')?.value;if(!s||!c)return;s.innerHTML='<option value="">Select student</option>'+(db.students[c]||[]).map((x,i)=>`<option value="${x.id||i}">${x.name||'Unnamed'}${x.rollNo?' | Roll: '+x.rollNo:''}</option>`).join('');}
     function reportPrintTypeChanged(){let t=document.getElementById('reportPrintType')?.value;let needsClass=!['teacher-list','class-percentage'].includes(t);let needsStudent=['student-result','student-complete','student-fee-detail','student-attendance','previous-class-history','class-student-report'].includes(t);document.getElementById('reportPrintClassWrap')?.classList.toggle('hidden',!needsClass);document.getElementById('reportPrintStudentWrap')?.classList.toggle('hidden',!needsStudent);populateReportPrintClassSelect();populateReportPrintStudentSelect();}
@@ -7438,22 +7499,22 @@ async function printPreviousPromotionData(index) {
         const fees=[...feeGroups.values()];
         const rows=fees.map(f=>`<tr><td>${f.date||f.month||''}</td><td>${feeAmountValue(f)}</td><td>${feePaidValue(f)}</td><td>${normalizeFeeStatus(f.status,feeAmountValue(f),feePaidValue(f))}</td></tr>`).join('');
         const total=fees.reduce((a,f)=>a+feeAmountValue(f),0),paid=fees.reduce((a,f)=>a+feePaidValue(f),0);
-        return `<div class="report-page">${reportPrintHeader('Student — Complete Fee History')}<div class="custom-report-meta"><span><b>Name:</b> ${student.name||''}</span><span><b>Class:</b> ${className}</span><span><b>Roll:</b> ${student.rollNo||'N/A'}</span></div><table class="custom-report-table"><thead><tr><th>Date/Month</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="4">No fee records found.</td></tr>'}</tbody></table><p><b>Total Fees:</b> ${total} &nbsp; <b>Paid:</b> ${paid} &nbsp; <b>Balance:</b> ${total-paid}</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader('Student — Complete Fee History')}<div class="custom-report-meta"><span><b>Name:</b> ${student.name||''}</span><span><b>Class:</b> ${className}</span><span><b>Roll:</b> ${student.rollNo||'N/A'}</span></div><table class="custom-report-table"><thead><tr><th>Date/Month</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="4">No fee records found.</td></tr>'}</tbody></table><p><b>Total Fees:</b> ${total} &nbsp; <b>Paid:</b> ${paid} &nbsp; <b>Balance:</b> ${total-paid}</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
     function buildClassFeeHistoryReport(c){
         const students=db.students[c]||[], rows=students.map((s,i)=>{const fees=(db.fees||[]).filter(f=>String(f.studentId||f.student_id||'')===String(s.id||''));const total=fees.reduce((a,f)=>a+Number(f.amount||f.total||f.feeAmount||0),0),paid=fees.reduce((a,f)=>a+Number(f.paidAmount||f.paid||0),0);return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td>${fees.map(f=>f.date||f.month||'').join(', ')||'—'}</td><td class="center">${total}</td><td class="center">${paid}</td><td class="center">${total-paid}</td></tr>`}).join('');
-        return `<div class="report-page">${reportPrintHeader(`Student — Complete Fee History — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Dates/Months</th><th>Total Fees</th><th>Paid</th><th>Balance</th></tr></thead><tbody>${rows||'<tr><td colspan="6">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader(`Student — Complete Fee History — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Dates/Months</th><th>Total Fees</th><th>Paid</th><th>Balance</th></tr></thead><tbody>${rows||'<tr><td colspan="6">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
     async function buildStudentAttendanceReport(student,className){
         await ensureStudentReportHistoryLoaded_(student?.id);
         const log=student.attendanceLog||{}, dates=Object.keys(log).sort();
         const rows=dates.map(d=>`<tr><td>${d}</td><td class="center">${String(log[d]).toUpperCase()==='P'?'Present':'Absent'}</td></tr>`).join('');
         const present=dates.filter(d=>String(log[d]).toUpperCase()==='P').length, absent=dates.filter(d=>String(log[d]).toUpperCase()!=='P').length, total=present+absent;
-        return `<div class="report-page">${reportPrintHeader('Student — Attendance Report')}<div class="custom-report-meta"><span><b>Name:</b> ${student.name||''}</span><span><b>Class:</b> ${className}</span><span><b>Roll:</b> ${student.rollNo||'N/A'}</span></div><table class="custom-report-table"><thead><tr><th>Date</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="2">No attendance records found.</td></tr>'}</tbody></table><p><b>Present:</b> ${present} &nbsp; <b>Absent:</b> ${absent} &nbsp; <b>Attendance:</b> ${total?Math.round((present/total)*100):0}%</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader('Student — Attendance Report')}<div class="custom-report-meta"><span><b>Name:</b> ${student.name||''}</span><span><b>Class:</b> ${className}</span><span><b>Roll:</b> ${student.rollNo||'N/A'}</span></div><table class="custom-report-table"><thead><tr><th>Date</th><th>Status</th></tr></thead><tbody>${rows||'<tr><td colspan="2">No attendance records found.</td></tr>'}</tbody></table><p><b>Present:</b> ${present} &nbsp; <b>Absent:</b> ${absent} &nbsp; <b>Attendance:</b> ${total?Math.round((present/total)*100):0}%</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
     function buildClassAttendanceReport(c){
         const rows=(db.students[c]||[]).map((s,i)=>{const log=s.attendanceLog||{},dates=Object.keys(log),p=dates.filter(d=>String(log[d]).toUpperCase()==='P').length,a=dates.length-p;return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${p}</td><td class="center">${a}</td><td class="center">${dates.length?Math.round((p/dates.length)*100):0}%</td></tr>`}).join('');
-        return `<div class="report-page">${reportPrintHeader(`Student — Attendance Report — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Present</th><th>Absent</th><th>Attendance %</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus</div></div>`;
+        return `<div class="report-page">${reportPrintHeader(`Student — Attendance Report — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Present</th><th>Absent</th><th>Attendance %</th></tr></thead><tbody>${rows||'<tr><td colspan="5">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;
     }
 
     async function ensurePreviousClassDataLoaded_(studentId) {
@@ -7509,7 +7570,7 @@ async function printPreviousPromotionData(index) {
             const promotedTime = h.promotedAt ? new Date(h.promotedAt).getTime() : NaN;
             const fullLog = student.attendanceLog || {};
             const prevAttendanceDates = Object.keys(fullLog).filter(d => !isNaN(promotedTime) && new Date(d).getTime() < promotedTime);
-            return `<div class="report-page">${reportPrintHeader('Previous Class Historical Report')}<div class="custom-report-meta"><span><b>Student:</b> ${student.name||h.studentName||''}</span><span><b>Previous Class:</b> ${prevClass}</span><span><b>Promoted To:</b> ${h.toClass||''}</span><span><b>Previous Roll:</b> ${h.oldRoll||p.rollNo||''}</span></div><h3>Previous Class Marks</h3><table class="custom-report-table"><thead><tr><th>Subject</th><th>Marks</th></tr></thead><tbody>${Object.entries(p.marks||h.oldMarks||{}).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')||'<tr><td colspan="2">No marks snapshot.</td></tr>'}</tbody></table><h3>Previous Class Fees</h3><table class="custom-report-table"><thead><tr><th>Date/Month</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${fees.map(f=>`<tr><td>${f.date||f.month||''}</td><td>${f.amount||f.total||f.feeAmount||0}</td><td>${f.paidAmount||f.paid||0}</td><td>${f.status||''}</td></tr>`).join('')||'<tr><td colspan="4">No fee records found for this class.</td></tr>'}</tbody></table><h3>Previous Class Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Subject</th><th>Obtained</th><th>Total</th><th>%</th></tr></thead><tbody>${er||'<tr><td colspan="5">No exam records found for this class.</td></tr>'}</tbody></table><p><b>Previous Attendance:</b> ${prevAttendanceDates.length} saved attendance entries</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmd Haseeb Campus | Previous-class snapshot</div></div>`;
+            return `<div class="report-page">${reportPrintHeader('Previous Class Historical Report')}<div class="custom-report-meta"><span><b>Student:</b> ${student.name||h.studentName||''}</span><span><b>Previous Class:</b> ${prevClass}</span><span><b>Promoted To:</b> ${h.toClass||''}</span><span><b>Previous Roll:</b> ${h.oldRoll||p.rollNo||''}</span></div><h3>Previous Class Marks</h3><table class="custom-report-table"><thead><tr><th>Subject</th><th>Marks</th></tr></thead><tbody>${Object.entries(p.marks||h.oldMarks||{}).map(([k,v])=>`<tr><td>${k}</td><td>${v}</td></tr>`).join('')||'<tr><td colspan="2">No marks snapshot.</td></tr>'}</tbody></table><h3>Previous Class Fees</h3><table class="custom-report-table"><thead><tr><th>Date/Month</th><th>Amount</th><th>Paid</th><th>Status</th></tr></thead><tbody>${fees.map(f=>`<tr><td>${f.date||f.month||''}</td><td>${f.amount||f.total||f.feeAmount||0}</td><td>${f.paidAmount||f.paid||0}</td><td>${f.status||''}</td></tr>`).join('')||'<tr><td colspan="4">No fee records found for this class.</td></tr>'}</tbody></table><h3>Previous Class Exam Results</h3><table class="custom-report-table"><thead><tr><th>Exam</th><th>Subject</th><th>Obtained</th><th>Total</th><th>%</th></tr></thead><tbody>${er||'<tr><td colspan="5">No exam records found for this class.</td></tr>'}</tbody></table><p><b>Previous Attendance:</b> ${prevAttendanceDates.length} saved attendance entries</p><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus | Previous-class snapshot</div></div>`;
         }).join('');
     }
     function openReportPrintSelection(){if(currentUser&&currentUser.role==='Teacher'){showToast('Only admin can print reports','error');return;}let m=document.getElementById('reportPrintSelectionModal');if(!m){printAllFilteredReports();return;}document.getElementById('reportPrintType').value='class-contact';reportPrintTypeChanged();m.classList.remove('hidden');document.body.style.overflow='hidden';}
@@ -8152,9 +8213,165 @@ async function printPreviousPromotionData(index) {
 
     // ==================== DATA EXPORT/IMPORT ====================
     function exportData() { if (currentUser?.role === 'Teacher') { showToast('Only admin can export data', 'error'); return; } const dataStr = JSON.stringify(db, null, 2); const blob = new Blob([dataStr], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `school_data_${new Date().toISOString().split('T')[0]}.json`; a.click(); URL.revokeObjectURL(url); showToast('Data exported successfully! 📥', 'success'); }
-    function importData() { if (currentUser?.role === 'Teacher') { showToast('Only admin can import data', 'error'); return; } const input = document.createElement('input'); input.type = 'file'; input.accept = '.json'; input.onchange = (e) => { const file = e.target.files[0]; if (!file) return; const reader = new FileReader(); reader.onload = (event) => { try { const data = JSON.parse(event.target.result); if (data.students && data.teachers !== undefined) { db = data; if (!db.subjects) db.subjects = {}; if (!db.attendanceMarkedDates) db.attendanceMarkedDates = {}; if (!db.deleted) db.deleted = []; if (!Array.isArray(db.studentArchive)) db.studentArchive = []; if (!Array.isArray(db.promotionHistory)) db.promotionHistory = []; if (!db.fees) db.fees = []; if (!db.exams) db.exams = []; if (!db.examResults) db.examResults = {}; if (!db.notices) db.notices = []; migrateSubjectsToObjects(); migrateStudentRollNumbers(); saveDatabase(); refreshStudentsAfterChange_(); loadTeachers(); loadSubjects(); loadAttendance(); loadFees(); loadExams(); loadDeletedItems(); loadNotices(); showToast('Data imported successfully! 📤', 'success'); } else { showToast('Invalid data format!', 'error'); } } catch(err) { showToast('Error reading file!', 'error'); } }; reader.readAsText(file); }; input.click(); }
+    // IMPORT: persist the complete JSON dataset to the school-scoped Supabase tables, then
+    // reload from Supabase. This makes Import a one-time operation; reopening the app reads
+    // the saved data from Supabase instead of requiring the JSON file again.
+    async function upsertImportedRows_(table, rows, conflict) {
+        const clean = Array.isArray(rows) ? rows.filter(Boolean) : [];
+        if (!clean.length) return;
+        const BATCH_SIZE = 500;
+        const CONCURRENCY = 4;
+        for (let start = 0; start < clean.length; start += BATCH_SIZE * CONCURRENCY) {
+            const group = [];
+            for (let i = start; i < Math.min(clean.length, start + BATCH_SIZE * CONCURRENCY); i += BATCH_SIZE) {
+                group.push(clean.slice(i, i + BATCH_SIZE));
+            }
+            await Promise.all(group.map(batch => supabaseTableRequest(table, {
+                method: 'POST',
+                query: `?on_conflict=${conflict}`,
+                headers: { 'Prefer': 'resolution=merge-duplicates,return=minimal' },
+                body: JSON.stringify(batch)
+            })));
+        }
+    }
+
+    function importedAttendanceRows_(data) {
+        const rows = [];
+        Object.entries(data?.attendance || {}).forEach(([className, students]) => {
+            Object.entries(students || {}).forEach(([studentId, dates]) => {
+                Object.entries(dates || {}).forEach(([date, status]) => {
+                    const normalizedStatus = String(status || '').trim().toLowerCase();
+                    // Supabase attendance_status_check intentionally allows only P/A.
+                    // The imported test JSON uses Present/Absent/Leave labels, so normalize
+                    // those labels before writing without changing the database schema.
+                    // Leave is treated as unmarked/absent-compatible state by the existing
+                    // two-state attendance model and is stored as A.
+                    const dbStatus = normalizedStatus === 'p' || normalizedStatus === 'present'
+                        ? 'P'
+                        : 'A';
+                    rows.push({
+                        id: uuid_(), school_id: SUPABASE_SCHOOL_ID, student_id: String(studentId),
+                        attendance_date: safeDate_(date), status: dbStatus
+                    });
+                });
+            });
+        });
+        return rows;
+    }
+
+    function importedMarkedDateRows_(data) {
+        const rows = [], seen = new Set();
+        Object.entries(data?.attendanceMarkedDates || {}).forEach(([date, classes]) => {
+            Object.keys(classes || {}).forEach(className => {
+                const key = `${date}|${className}`;
+                if (seen.has(key)) return;
+                seen.add(key);
+                rows.push({ id: uuid_(), school_id: SUPABASE_SCHOOL_ID,
+                    attendance_date: safeDate_(date), class_name: String(className) });
+            });
+        });
+        return rows;
+    }
+
+    function normalizeImportedExamResults_(data) {
+        const out = {};
+        Object.entries(data?.examResults || {}).forEach(([examId, studentMap]) => {
+            out[String(examId)] = {};
+            Object.entries(studentMap || {}).forEach(([studentId, value]) => {
+                const n = (value && typeof value === 'object')
+                    ? Number(value.obtainedMarks ?? value.obtained_marks ?? value.total ?? 0)
+                    : Number(value || 0);
+                out[String(examId)][String(studentId)] = Number.isFinite(n) ? n : 0;
+            });
+        });
+        return out;
+    }
+
+    function importedExamResultRows_(data) {
+        const rows = [];
+        const normalized = normalizeImportedExamResults_(data);
+        Object.entries(normalized).forEach(([examId, studentMap]) => {
+            Object.entries(studentMap || {}).forEach(([studentId, marks]) => {
+                rows.push({ id: uuid_(), school_id: SUPABASE_SCHOOL_ID, exam_id: String(examId),
+                    student_id: String(studentId), obtained_marks: Number(marks || 0) });
+            });
+        });
+        return rows;
+    }
+
+    function importData() {
+        if (currentUser?.role === 'Teacher') { showToast('Only admin can import data', 'error'); return; }
+        if (!databaseLoadedFromSupabase) { showToast('⚠️ School data is still loading. Please wait before importing.', 'warning'); return; }
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0]; if (!file) return;
+            const reader = new FileReader();
+            reader.onload = async (event) => {
+                try {
+                    if (historicalFeesResultsLoading_) await historicalFeesResultsLoading_;
+                    const data = JSON.parse(event.target.result);
+                    if (!data.students || data.teachers === undefined) { showToast('Invalid data format!', 'error'); return; }
+
+                    // Capture relational import data before the normal snapshot save rebuilds
+                    // its local attendance mirror.
+                    const importedAttendance = importedAttendanceRows_(data);
+                    const importedMarkedDates = importedMarkedDateRows_(data);
+                    const importedResults = importedExamResultRows_(data);
+
+                    db = data;
+                    if (!db.subjects) db.subjects = {};
+                    if (!db.attendance) db.attendance = {};
+                    if (!db.attendanceMarkedDates) db.attendanceMarkedDates = {};
+                    if (!db.deleted) db.deleted = [];
+                    if (!Array.isArray(db.studentArchive)) db.studentArchive = [];
+                    if (!Array.isArray(db.promotionHistory)) db.promotionHistory = [];
+                    if (!db.fees) db.fees = [];
+                    if (!db.exams) db.exams = [];
+                    db.examResults = normalizeImportedExamResults_(data);
+                    if (!db.notices) db.notices = [];
+                    migrateSubjectsToObjects(); migrateStudentRollNumbers();
+
+                    showToast('Saving imported data to Supabase… ⏳', 'info');
+                    const baseSaved = await saveDatabase();
+                    if (!baseSaved) { showToast('❌ Import was not completed. Existing Supabase data was not replaced.', 'error'); return; }
+
+                    // The normal save intentionally excludes attendance/results to keep ordinary
+                    // saves lightweight. Import is different: it must persist the complete test set.
+                    await upsertImportedRows_('attendance', importedAttendance, 'student_id,attendance_date');
+                    await upsertImportedRows_('attendance_marked_dates', importedMarkedDates, 'school_id,attendance_date,class_name');
+                    await upsertImportedRows_('exam_results', importedResults, 'exam_id,student_id');
+
+                    // Supabase is now the source of truth. Reloading here also verifies that the
+                    // same saved data can be recovered without another JSON import.
+                    const reloaded = await loadSeparateTablesFromSupabase(false);
+                    if (!reloaded) { showToast('⚠️ Data was saved, but automatic verification/reload failed. Please refresh once.', 'warning'); return; }
+                    await ensureHistoricalFeesResultsLoaded_();
+                    refreshStudentsAfterChange_(); loadTeachers(); loadSubjects(); loadAttendance(); loadFees(); loadExams(); loadDeletedItems(); loadNotices(); updateStats();
+                    showToast('✅ Data imported, saved to Supabase, and verified. No re-import is needed.', 'success');
+                } catch(err) {
+                    console.error('Complete JSON import failed:', err);
+                    showToast('❌ Import failed: ' + (err.message || err), 'error');
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
     // ==================== SELECTIVE DATA RESET ====================
     // Reset is always Admin-only and the password is re-verified before running.
+    function openFullSchoolWipe() {
+        if (currentUser?.role !== 'Admin') { showToast('Only admin can wipe school data', 'error'); return; }
+        const modal = document.getElementById('selectiveResetModal');
+        if (!modal) return;
+        document.getElementById('selectiveResetPassword').value = '';
+        document.getElementById('selectiveResetType').value = 'all_school_data';
+        updateSelectiveResetWarning();
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        setTimeout(() => document.getElementById('selectiveResetPassword')?.focus(), 100);
+    }
+
     function openSelectiveReset() {
         if (currentUser?.role !== 'Admin') { showToast('Only admin can reset data', 'error'); return; }
         const modal = document.getElementById('selectiveResetModal');
@@ -8214,7 +8431,7 @@ async function printPreviousPromotionData(index) {
 
     async function resetSupabaseSelected_(type){
         const del=table=>supabaseTableRequest(table,{method:'DELETE',query:`?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}`});
-        switch(type){case 'students':await del('fees');await del('attendance');await del('exam_results');await del('promotion_history');await del('student_archive');await del('students');break;case 'teachers':await del('teachers');break;case 'subjects':await del('subjects');break;case 'attendance':await del('attendance');await del('attendance_marked_dates');break;case 'exams':await del('exam_results');await del('exams');break;case 'examResults':await del('exam_results');break;case 'fees':await del('fees');break;case 'notices':await del('notices');break;case 'deleted':await del('deleted_records');break;case 'backup_data':await clearArchiveCenterState_();break;case 'backup_history':await del('backups');break;case 'all_backups':await clearArchiveCenterState_();await del('backups');break;case 'all_school_data':await del('exam_results');await del('attendance');await del('attendance_marked_dates');await del('fees');await del('exams');await del('subjects');await del('teachers');await del('deleted_records');await del('student_archive');await del('students');await clearArchiveCenterState_();break;default:throw new Error('Unknown reset type.');}return true;
+        switch(type){case 'students':await del('fees');await del('attendance');await del('exam_results');await del('promotion_history');await del('student_archive');await del('students');break;case 'teachers':await del('teachers');break;case 'subjects':await del('subjects');break;case 'attendance':await del('attendance');await del('attendance_marked_dates');break;case 'exams':await del('exam_results');await del('exams');break;case 'examResults':await del('exam_results');break;case 'fees':await del('fees');break;case 'notices':await del('notices');break;case 'deleted':await del('deleted_records');break;case 'backup_data':await clearArchiveCenterState_();break;case 'backup_history':await del('backups');break;case 'all_backups':await clearArchiveCenterState_();await del('backups');break;case 'all_school_data':await del('exam_results');await del('attendance');await del('attendance_marked_dates');await del('fees');await del('exams');await del('subjects');await del('teachers');await del('deleted_records');await del('student_archive');await del('promotion_history');await del('students');await clearArchiveCenterState_();await del('backups');break;default:throw new Error('Unknown reset type.');}return true;
     }
 
     async function executeSelectiveReset() {
@@ -8245,7 +8462,7 @@ async function printPreviousPromotionData(index) {
                 case 'teachers':db.teachers=[];break;case 'subjects':db.subjects={};break;case 'attendance':db.attendance={};db.attendanceMarkedDates={};Object.keys(db.students||{}).forEach(cls=>(db.students[cls]||[]).forEach(s=>{s.attendanceLog={};s.present=0;s.absences=0;}));break;
                 case 'exams':db.exams=[];db.examResults={};break;case 'examResults':db.examResults={};break;case 'fees':db.fees=[];break;case 'notices':db.notices=[];break;case 'deleted':db.deleted=[];break;
                 case 'backup_data':db.archive={attendance:[],exams:[],fees:[]};archiveCenterLoaded_=true;break;case 'backup_history':db.backupHistory=[];backupHistoryLoaded_=true;break;case 'all_backups':db.archive={attendance:[],exams:[],fees:[]};db.backupHistory=[];archiveCenterLoaded_=true;backupHistoryLoaded_=true;break;
-                case 'all_school_data':db.students={};db.teachers=[];db.subjects={};db.attendance={};db.attendanceMarkedDates={};db.exams=[];db.examResults={};db.fees=[];db.notices=[];db.deleted=[];db.studentArchive=[];db.archive={attendance:[],exams:[],fees:[]};archiveCenterLoaded_=true;break;
+                case 'all_school_data':db.students={};db.teachers=[];db.subjects={};db.attendance={};db.attendanceMarkedDates={};db.exams=[];db.examResults={};db.fees=[];db.notices=[];db.deleted=[];db.studentArchive=[];db.promotionHistory=[];db.archive={attendance:[],exams:[],fees:[]};db.backupHistory=[];archiveCenterLoaded_=true;backupHistoryLoaded_=true;break;
             }
 
             refreshStudentsAfterChange_(); loadTeachers(); loadSubjects(); loadAttendance(); loadFees();
