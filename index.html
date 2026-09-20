@@ -2593,7 +2593,22 @@ async function saveArchiveFast_(items, label='archive') {
         // Subjects have a database-level unique key on (school_id, class_name, name).
         // Use that natural key so an existing subject is updated instead of producing HTTP 409.
         const conflict = table === 'subjects' ? 'school_id,class_name,name' : 'id';
-        await supabaseTableRequest(table,{method:'POST',query:`?on_conflict=${conflict}`,headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(rows)});
+        // If the SAME conflict key appears twice in one batch, Postgres rejects
+        // the WHOLE request with "ON CONFLICT DO UPDATE command cannot affect
+        // row a second time" (error 21000) — confirmed in Supabase's own logs
+        // as the actual cause behind promotions/saves failing with no visible
+        // reason. A single stray duplicate (e.g. a student briefly present in
+        // two classes) was silently killing every row in the same save, not
+        // just the duplicate. Keep only the last occurrence of each key so one
+        // bad row can never take an entire otherwise-good batch down with it.
+        const keyFields = conflict.split(',');
+        const dedupMap = new Map();
+        rows.forEach(row => {
+            const key = keyFields.map(f => String(row[f] ?? '')).join('|');
+            dedupMap.set(key, row); // last occurrence wins
+        });
+        const deduped = [...dedupMap.values()];
+        await supabaseTableRequest(table,{method:'POST',query:`?on_conflict=${conflict}`,headers:{'Prefer':'resolution=merge-duplicates,return=minimal'},body:JSON.stringify(deduped)});
     }
 
 
