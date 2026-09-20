@@ -1324,8 +1324,8 @@ img, canvas, svg { max-width: 100%; height: auto; }
                                 <button onclick="openSectionReportSelection_('student-fee')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-print"></i> Print Report</button>
                                 <select id="feeStudentPrintStatus" class="bg-white border border-gray-200 rounded-xl px-3 py-2 text-xs font-semibold focus:border-indigo-500 focus:outline-none admin-only">
                                     <option value="Paid">Paid Students</option>
+                                    <option value="Partial">Partial Students</option>
                                     <option value="Unpaid">Unpaid Students</option>
-                                    <option value="Pending">Pending Students</option>
                                 </select>
                                 <button onclick="printFeeStudentsByStatus()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-print"></i> Print Status Students</button>
                                 <button onclick="addTuitionFee()" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition admin-only"><i class="fa-solid fa-plus"></i> Add Fee Record</button>
@@ -2919,8 +2919,24 @@ async function saveArchiveFast_(items, label='archive') {
         }, 0);
     }
 
+    // If a "fast save" job's own request hangs forever (dropped wifi, phone
+    // screen locked mid-request, tab backgrounded, etc.), it previously never
+    // rejected — so onlineSaveQueue sat pending forever and EVERY later save
+    // (including later promotions) silently never ran, with no error shown,
+    // because a .then() chain only skips ahead on a rejection, never on a job
+    // that just never settles. This forces a stuck job to fail after 25s so
+    // the queue can move on and the normal "save failed" warning can fire.
+    function withTimeout_(promise, ms, label) {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(`${label || 'Save'} timed out after ${Math.round(ms/1000)}s — check your internet connection.`)), ms);
+            Promise.resolve(promise).then(v => { clearTimeout(timer); resolve(v); }, e => { clearTimeout(timer); reject(e); });
+        });
+    }
+
     function queueFastSave_(job) {
-        onlineSaveQueue = onlineSaveQueue.catch(() => false).then(job);
+        const run = () => withTimeout_(Promise.resolve().then(job), 25000, 'Online save')
+            .catch(error => { console.error('Fast save error/timeout:', error); return false; });
+        onlineSaveQueue = onlineSaveQueue.catch(() => false).then(run);
         return onlineSaveQueue;
     }
 
@@ -6107,20 +6123,42 @@ ${lines}
         return (db.fees || []).filter(f => selectedFeeIds.has(String(f.id)));
     }
 
-    function getFeeStudentPrintStatus_(student, className) {
+    // Returns the real Paid/Partial/Unpaid status for a student PLUS the actual
+    // amount/paid/due figures to print — from the same record every time, so the
+    // printed numbers always match the status shown.
+    // Previously this only ever returned 'Paid' or 'Unpaid' (never 'Partial'),
+    // and only looked at a fee record for the exact current calendar month —
+    // if the student's latest fee entry was for any other month, it fell back
+    // to a bare status flag and printed 0 for fee/paid/due even though the
+    // student genuinely had those amounts on file.
+    function getFeeStudentPrintInfo_(student, className) {
         const currentMonth = FEE_MONTHS[new Date().getMonth()];
         const currentYear = getCurrentAcademicYear();
-        const record = getStudentMonthFeeRecord_(className, student.id, currentMonth, currentYear);
+        let record = getStudentMonthFeeRecord_(className, student.id, currentMonth, currentYear);
+        if (!record) {
+            // No fee entry for the current month — fall back to the student's
+            // most recent fee record in this class so their real status and
+            // amounts still show instead of a blank/zeroed row.
+            const allRecords = (db.fees || []).filter(f =>
+                String(f.studentId || f.student_id || '') === String(student.id) &&
+                String(f.class || f.className || '') === String(className));
+            record = allRecords.slice().sort((a, b) =>
+                String(b.paymentDate || b.date || '').localeCompare(String(a.paymentDate || a.date || ''))
+            )[0] || null;
+        }
         if (record) {
             const amount = feeAmountValue(record);
             const paid = feePaidValue(record);
+            const due = feeDueValue(record);
             const status = normalizeFeeStatus(record.status, amount, paid);
-            if (status === 'Paid') return 'Paid';
-            return 'Unpaid';
+            return { status, amount, paid, due, paidDate: record.paymentDate || record.date || '', record };
         }
-        const studentStatus = String(student.feeStatus || '').toLowerCase();
-        if (studentStatus === 'paid') return 'Paid';
-        return 'Unpaid';
+        const status = normalizeFeeStatus(student.feeStatus, 0, 0);
+        return { status, amount: 0, paid: 0, due: 0, paidDate: '', record: null };
+    }
+    // Kept for any other caller that only needs the status string.
+    function getFeeStudentPrintStatus_(student, className) {
+        return getFeeStudentPrintInfo_(student, className).status;
     }
 
     async function printFeeStudentsByStatus() {
@@ -6146,13 +6184,9 @@ ${lines}
         const students = [];
         Object.entries(db.students || {}).forEach(([className, list]) => {
             (list || []).forEach(student => {
-                if (getFeeStudentPrintStatus_(student, className) === selectedStatus) {
-                    const record = getStudentMonthFeeRecord_(className, student.id, currentMonth, currentYear);
-                    const amount = record ? feeAmountValue(record) : 0;
-                    const paid = record ? feePaidValue(record) : 0;
-                    const due = record ? feeDueValue(record) : 0;
-                    const paidDate = record ? (record.paymentDate || record.date || '') : '';
-                    students.push({ student, className, record, amount, paid, due, paidDate });
+                const info = getFeeStudentPrintInfo_(student, className);
+                if (info.status === selectedStatus) {
+                    students.push({ student, className, record: info.record, amount: info.amount, paid: info.paid, due: info.due, paidDate: info.paidDate });
                 }
             });
         });
