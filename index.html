@@ -2476,12 +2476,12 @@ async function saveArchiveFast_(items, label='archive') {
             month:f.month || null, academic_year:f.academicYear || null, fee_amount:Number(f.feeAmount ?? f.amount ?? 0),
             paid_amount:Number(f.paidAmount ?? 0), due_amount:Number(f.dueAmount ?? Math.max(0,(f.feeAmount ?? f.amount ?? 0)-(f.paidAmount ?? 0))),
             status:f.status || 'Unpaid', payment_date:safeDate_(f.paymentDate || f.date), receipt_no:f.receiptNumber || f.receiptNo || null,
-            notes:f.notes || null, fee_type:f.feeType || 'Monthly' };
+            notes:f.notes || null, fee_type:f.feeType || 'Monthly', discount:Number(f.discount || 0) };
     }
     function rowToFee(r) { return { id:String(r.id), studentId:r.student_id || '', studentName:r.student_name || '', rollNo:r.roll_no || '',
         class:r.class_name || '', fatherGuardianName:r.father_guardian_name || '', month:r.month || '', academicYear:r.academic_year || '',
         feeAmount:Number(r.fee_amount || 0), amount:Number(r.fee_amount || 0), paidAmount:Number(r.paid_amount || 0), dueAmount:Number(r.due_amount || 0),
-        status:r.status || 'Unpaid', paymentDate:r.payment_date || '', date:r.payment_date || '', receiptNumber:r.receipt_no || '', notes:r.notes || '', feeType:r.fee_type || 'Monthly', _supabase:true }; }
+        status:r.status || 'Unpaid', paymentDate:r.payment_date || '', date:r.payment_date || '', receiptNumber:r.receipt_no || '', notes:r.notes || '', feeType:r.fee_type || 'Monthly', discount:Number(r.discount || 0), _supabase:true }; }
     function examToRow(e) { return { id:String(e.id), school_id:SUPABASE_SCHOOL_ID, name:String(e.name || ''), class_name:e.class || e.className || '',
         subject:e.subject || '', exam_date:safeDate_(e.date || e.examDate), total_marks:Number(e.totalMarks || 100), passing:Number(e.passing || 40),
         academic_year:e.academicYear || null };
@@ -6065,7 +6065,7 @@ ${lines}
         if (normalizeFeeStatus(f?.status, amount, f?.paidAmount) === 'Paid' && amount > 0) return amount;
         return Number(f?.paidAmount || 0);
     }
-    function feeDueValue(f) { return Math.max(0, Number(f.dueAmount != null ? f.dueAmount : feeAmountValue(f) - feePaidValue(f))); }
+    function feeDueValue(f) { return Math.max(0, Number(f.dueAmount != null ? f.dueAmount : feeAmountValue(f) - Number(f.discount||0) - feePaidValue(f))); }
     function getFeeStudent(f) { return (db.students?.[f.class] || []).find(s => s.id === f.studentId); }
     function getCurrentAcademicYear() { const y = new Date().getFullYear(); return `${y}-${String(y + 1).slice(-2)}`; }
     function generateReceiptNumber() { return 'FEE-' + new Date().getFullYear() + '-' + String(Date.now()).slice(-6); }
@@ -6553,6 +6553,7 @@ ${lines}
             <div class="text-sm font-bold text-gray-800"><i class="fa-solid fa-user mr-1 text-yellow-600"></i> ${escFee(student.name)} <span class="text-xs font-normal text-gray-500">(Class ${escFee(className)} • Roll ${escFee(student.rollNo||'N/A')})</span></div>
             <div class="flex gap-2">
                 <button type="button" onclick="printStudentFeeChallan_('${escFee(className)}','${escFee(studentId)}')" class="bg-orange-600 hover:bg-orange-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-receipt"></i> Print Challan</button>
+                <button type="button" onclick="printStudentFeeLedger_('${escFee(className)}','${escFee(studentId)}')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-book"></i> Print Ledger</button>
                 <button type="button" onclick="addTuitionFee()" class="bg-yellow-600 hover:bg-yellow-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition admin-only"><i class="fa-solid fa-plus mr-1"></i> Add / Update Fee for This Student</button>
             </div>
         </div>
@@ -6564,8 +6565,154 @@ ${lines}
             <div class="bg-gray-50 rounded-xl p-3"><div class="text-[10px] text-gray-500 font-bold uppercase">Status</div><div class="text-lg font-bold">${escFee(status)}</div></div>
         </div>
         <div class="mt-3 text-xs text-gray-500">${currentRecords.length ? `Current month (${escFee(currentMonth)} ${escFee(currentYear)}): ${escFee(status)}${currentRecords.length>1 ? ` • ${currentRecords.length} duplicate record(s) already exist; new payments are blocked and the latest record is used.` : ''}.` : (records.length ? `${records.length} fee record(s) found${latest ? ` • Latest: ${escFee(latest.month||latest.date||'')}` : ''}.` : 'No fee record found for this student yet.')}</div>
+        ${renderCollectFeeTable_(className,studentId)}
         ${renderStudentFeeRecordsTable_(allRecords)}`;
         summary.classList.remove('hidden');
+    }
+
+    // "Collect Fee" — every outstanding fee item (any head, any month) for this
+    // student in one payable table: tick which items to pay now, optionally
+    // discount each one, and the Pay amount defaults to what's left owing.
+    function renderCollectFeeTable_(className, studentId) {
+        const items = getStudentOutstandingFeeItems_(className, studentId);
+        if (!items.length) {
+            return `<div class="mt-4 border-t pt-3"><div class="text-sm font-bold text-green-700"><i class="fa-solid fa-circle-check mr-1"></i> No outstanding balance for this student.</div></div>`;
+        }
+        const rows = items.map(f => {
+            const netDue = feeDueValue(f);
+            return `<tr data-fee-row="${f.id}" class="border-b border-gray-100">
+                <td class="py-2 px-2 text-center"><input type="checkbox" class="cf-check" data-fee-id="${f.id}" checked onchange="updateCollectFeeGrandTotal_()"></td>
+                <td class="py-2 px-2 text-left font-semibold">${escFee(f.feeType||'Monthly')}</td>
+                <td class="py-2 px-2 text-left">${escFee(f.month)} ${escFee(f.academicYear||'')}</td>
+                <td class="py-2 px-2 text-center">₨ ${netDue.toLocaleString()}</td>
+                <td class="py-2 px-2 text-center"><input type="number" min="0" max="${netDue}" value="${Number(f.discount||0)}" class="cf-discount w-20 border rounded px-1 py-0.5 text-center" data-fee-id="${f.id}" data-base-due="${netDue}" onchange="updateCollectFeeRow_('${f.id}')"></td>
+                <td class="py-2 px-2 text-center"><input type="number" min="0" max="${netDue}" value="${netDue}" class="cf-pay w-24 border rounded px-1 py-0.5 text-center font-bold" data-fee-id="${f.id}" onchange="updateCollectFeeGrandTotal_()"></td>
+            </tr>`;
+        }).join('');
+        return `<div class="mt-4 border-t pt-3">
+            <div class="text-sm font-bold text-gray-800 mb-2"><i class="fa-solid fa-hand-holding-dollar mr-1 text-emerald-600"></i> Collect Fee</div>
+            <div class="overflow-x-auto"><table class="w-full text-xs" id="collectFeeTable">
+                <thead><tr class="bg-gray-100 text-gray-600 uppercase font-bold">
+                    <th class="py-2 px-2"></th><th class="py-2 px-2 text-left">Fee Head</th><th class="py-2 px-2 text-left">Month</th>
+                    <th class="py-2 px-2">Balance</th><th class="py-2 px-2">Discount</th><th class="py-2 px-2">Pay</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>
+            <div class="mt-3 flex flex-wrap items-end justify-between gap-3 bg-emerald-50 rounded-xl p-3">
+                <div class="text-lg font-black text-emerald-700">Receive: ₨ <span id="collectFeeGrandTotal">${items.reduce((n,f)=>n+feeDueValue(f),0).toLocaleString()}</span></div>
+                <div class="flex flex-wrap gap-2 items-end">
+                    <div><label class="text-[10px] text-gray-500 font-bold uppercase block">Payment Method</label><select id="collectFeeMethod" class="border-2 border-gray-200 rounded-lg px-2 py-1.5 text-xs"><option>Hand Cash</option><option>Bank Transfer</option><option>Online</option><option>Cheque</option><option>Other</option></select></div>
+                    <div><label class="text-[10px] text-gray-500 font-bold uppercase block">Payment Date</label><input type="date" id="collectFeeDate" value="${new Date().toISOString().slice(0,10)}" class="border-2 border-gray-200 rounded-lg px-2 py-1.5 text-xs"></div>
+                    <button type="button" onclick="receiveFeePayment_('${escFee(className)}','${escFee(studentId)}',false)" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition admin-only"><i class="fa-solid fa-dollar-sign mr-1"></i> Receive Payment</button>
+                    <button type="button" onclick="receiveFeePayment_('${escFee(className)}','${escFee(studentId)}',true)" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition admin-only"><i class="fa-solid fa-dollar-sign mr-1"></i> Receive & Print Invoice</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    // Discount changed on one row: recompute that row's default Pay amount
+    // (balance minus discount), then refresh the grand total.
+    function updateCollectFeeRow_(feeId) {
+        const discountInput = document.querySelector(`.cf-discount[data-fee-id="${feeId}"]`);
+        const payInput = document.querySelector(`.cf-pay[data-fee-id="${feeId}"]`);
+        if (!discountInput || !payInput) return;
+        const baseDue = Number(discountInput.dataset.baseDue || 0);
+        const discount = Math.max(0, Math.min(baseDue, Number(discountInput.value) || 0));
+        discountInput.value = discount;
+        const netPayable = Math.max(0, baseDue - discount);
+        payInput.max = netPayable;
+        payInput.value = netPayable;
+        updateCollectFeeGrandTotal_();
+    }
+
+    function updateCollectFeeGrandTotal_() {
+        let total = 0;
+        document.querySelectorAll('.cf-check').forEach(chk => {
+            if (!chk.checked) return;
+            const pay = document.querySelector(`.cf-pay[data-fee-id="${chk.dataset.feeId}"]`);
+            total += Math.max(0, Number(pay?.value) || 0);
+        });
+        const el = document.getElementById('collectFeeGrandTotal');
+        if (el) el.textContent = total.toLocaleString();
+    }
+
+    // Applies the entered discount/payment to every ticked fee record, saves
+    // each to Supabase through the existing protected save queue, refreshes
+    // the panel, and (optionally) prints a combined payment invoice.
+    async function receiveFeePayment_(className, studentId, printInvoice) {
+        if (currentUser?.role === 'Teacher') { showToast('Only admin can receive fee payments', 'error'); return; }
+        const student = (db.students?.[className] || []).find(s => String(s.id) === String(studentId));
+        if (!student) { showToast('Student not found', 'error'); return; }
+        const checks = [...document.querySelectorAll('.cf-check')].filter(c => c.checked);
+        if (!checks.length) { showToast('Please select at least one fee item to pay', 'warning'); return; }
+        const method = document.getElementById('collectFeeMethod')?.value || 'Hand Cash';
+        const date = document.getElementById('collectFeeDate')?.value || new Date().toISOString().slice(0,10);
+        const paidItems = [];
+        for (const chk of checks) {
+            const feeId = chk.dataset.feeId;
+            const fee = (db.fees || []).find(f => f.id === feeId);
+            if (!fee) continue;
+            const discountInput = document.querySelector(`.cf-discount[data-fee-id="${feeId}"]`);
+            const payInput = document.querySelector(`.cf-pay[data-fee-id="${feeId}"]`);
+            const discount = Math.max(0, Number(discountInput?.value) || 0);
+            const pay = Math.max(0, Number(payInput?.value) || 0);
+            if (pay <= 0 && discount <= 0) continue;
+            const amount = feeAmountValue(fee);
+            const netPayable = Math.max(0, amount - discount);
+            const priorPaid = feePaidValue(fee);
+            // Never let a payment push the record past what's actually payable.
+            const newPaid = Math.min(netPayable, priorPaid + pay);
+            const newDue = Math.max(0, netPayable - newPaid);
+            fee.discount = discount;
+            fee.paidAmount = newPaid;
+            fee.dueAmount = newDue;
+            fee.status = newDue <= 0 ? 'Paid' : (newPaid > 0 ? 'Partial' : 'Unpaid');
+            fee.paymentDate = date; fee.date = date;
+            if (!fee.receiptNumber) fee.receiptNumber = generateReceiptNumber();
+            queueFastSave_(() => saveFeeFast_(fee, 'collect fee payment')).then(ok => { if (!ok) showToast(`⚠️ ${student.name}'s payment is visible locally but online save failed.`, 'warning'); });
+            paidItems.push({ fee: clone_(fee), paidNow: Math.min(pay, netPayable - priorPaid > 0 ? netPayable - priorPaid : pay) });
+        }
+        if (!paidItems.length) { showToast('Nothing to receive — enter a payment or discount amount', 'warning'); return; }
+        student.feeStatus = getStudentEffectiveFeeStatus_(student, className);
+        showToast(`✅ Payment received for ${student.name}`, 'success');
+        showStudentFeeSummary_(className, studentId);
+        if (printInvoice) printFeePaymentInvoice_(student, className, paidItems, method, date);
+    }
+
+    // A combined receipt/invoice for everything just collected in one "Receive
+    // Payment & Print Invoice" action — separate from the Fee Challan (which
+    // lists what's still OWED); this one lists what was just PAID.
+    function printFeePaymentInvoice_(student, className, paidItems, method, date) {
+        const receiptNo = paidItems[0]?.fee?.receiptNumber || generateReceiptNumber();
+        const rows = paidItems.map(({fee, paidNow}) => `<tr>
+                <td style="padding:8px;border:1px solid #999;">${escFee(fee.feeType||'Monthly')} Fee — ${escFee(fee.month)} ${escFee(fee.academicYear||'')}</td>
+                <td style="padding:8px;border:1px solid #999;text-align:right;">${Number(fee.discount||0).toLocaleString()}</td>
+                <td style="padding:8px;border:1px solid #999;text-align:right;">${Math.max(0,paidNow).toLocaleString()}</td>
+            </tr>`).join('');
+        const totalPaid = paidItems.reduce((n,{paidNow})=>n+Math.max(0,paidNow),0);
+        const totalDiscount = paidItems.reduce((n,{fee})=>n+Number(fee.discount||0),0);
+        const page = `<div class="report-page">
+            <div class="report-header" style="text-align:center;">
+                <div style="display:flex;align-items:center;justify-content:center;gap:8px;">${schoolLogoImgTag_()}<h1 style="margin:0;">THE EDUCATORS SCHOOL</h1></div>
+                <h2>Ahmad Haseeb Campus</h2>
+                <h3>Payment Receipt</h3>
+            </div>
+            <table style="width:100%;font-size:13px;border-collapse:collapse;margin:14px 0;">
+                <tr><td style="padding:4px 0;width:25%;color:#555;">Receipt No:</td><td style="padding:4px 0;font-weight:bold;">${escFee(receiptNo)}</td><td style="padding:4px 0;width:15%;color:#555;">Date:</td><td style="padding:4px 0;font-weight:bold;">${escFee(date)}</td></tr>
+                <tr><td style="padding:4px 0;color:#555;">Student Name:</td><td style="padding:4px 0;font-weight:bold;" colspan="3">${escFee(student.name||'')}</td></tr>
+                <tr><td style="padding:4px 0;color:#555;">Father Name:</td><td style="padding:4px 0;font-weight:bold;">${escFee(student.father||'N/A')}</td><td style="padding:4px 0;color:#555;">Class:</td><td style="padding:4px 0;font-weight:bold;">${escFee(className)}</td></tr>
+                <tr><td style="padding:4px 0;color:#555;">Payment Method:</td><td style="padding:4px 0;font-weight:bold;" colspan="3">${escFee(method)}</td></tr>
+            </table>
+            <table style="width:100%;border-collapse:collapse;font-size:13px;">
+                <thead><tr style="background:#1e3a8a;color:white;"><th style="padding:8px;border:1px solid #999;text-align:left;">Fee Details</th><th style="padding:8px;border:1px solid #999;">Discount</th><th style="padding:8px;border:1px solid #999;">Paid</th></tr></thead>
+                <tbody>${rows}
+                <tr style="font-weight:bold;background:#fef3c7;"><td style="padding:8px;border:1px solid #999;text-align:right;">Total</td><td style="padding:8px;border:1px solid #999;text-align:right;">${totalDiscount.toLocaleString()}</td><td style="padding:8px;border:1px solid #999;text-align:right;">${totalPaid.toLocaleString()}</td></tr>
+                </tbody>
+            </table>
+            <div class="signatures" style="margin-top:30px;"><div class="sig"><div class="sig-line">Received By</div></div><div class="sig"><div class="sig-line">Parent / Guardian</div></div></div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
+        </div>`;
+        printHTML(page);
     }
 
     // Lists EVERY fee record for the looked-up student (all months/years), so
@@ -6793,6 +6940,53 @@ ${lines}
                 </tbody>
             </table>
             <div class="signatures" style="margin-top:30px;"><div class="sig"><div class="sig-line">Received By</div></div><div class="sig"><div class="sig-line">Parent / Guardian</div></div></div>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
+        </div>`;
+        printHTML(page);
+    }
+
+    // Full historical fee ledger for one student — every transaction ever
+    // recorded (any fee head, any month, paid or not), for a parent's or
+    // auditor's complete-picture printout.
+    function printStudentFeeLedger_(className, studentId) {
+        if (currentUser?.role === 'Teacher') { showToast('Only admin can print fee ledgers', 'error'); return; }
+        const student = (db.students?.[className] || []).find(s => String(s.id) === String(studentId));
+        if (!student) { showToast('Student not found', 'error'); return; }
+        const records = (db.fees || []).filter(f => String(f.studentId||f.student_id||'')===String(studentId) && String(f.class||f.className||'')===String(className));
+        if (!records.length) { showToast(`No fee records found for ${student.name}`, 'warning'); return; }
+        const sorted = records.slice().sort((a,b) => {
+            const ak = `${a.academicYear||''}|${String(FEE_MONTHS.indexOf(a.month)).padStart(2,'0')}`;
+            const bk = `${b.academicYear||''}|${String(FEE_MONTHS.indexOf(b.month)).padStart(2,'0')}`;
+            return ak.localeCompare(bk);
+        });
+        const rows = sorted.map(f => {
+            const amount=feeAmountValue(f), discount=Number(f.discount||0), paid=feePaidValue(f), due=feeDueValue(f);
+            return `<tr>
+                <td style="padding:6px;border:1px solid #ccc;">${escFee(f.paymentDate||f.date||'')}</td>
+                <td style="padding:6px;border:1px solid #ccc;">${escFee(f.month)} ${escFee(f.academicYear||'')}</td>
+                <td style="padding:6px;border:1px solid #ccc;">${escFee(f.feeType||'Monthly')}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:right;">${amount.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:right;">${discount.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:right;">${paid.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:right;">${due.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:center;">${escFee(normalizeFeeStatus(f.status,amount,paid))}</td>
+            </tr>`;
+        }).join('');
+        const totalFee = sorted.reduce((n,f)=>n+feeAmountValue(f),0);
+        const totalDiscount = sorted.reduce((n,f)=>n+Number(f.discount||0),0);
+        const totalPaid = sorted.reduce((n,f)=>n+feePaidValue(f),0);
+        const totalDue = sorted.reduce((n,f)=>n+feeDueValue(f),0);
+        const page = `<div class="report-page">${reportPrintHeader('Student Fee Ledger')}
+            <div class="custom-report-meta"><span><b>Name:</b> ${escFee(student.name||'')}</span><span><b>Class:</b> ${escFee(className)}</span><span><b>Roll:</b> ${escFee(student.rollNo||'N/A')}</span><span><b>Father:</b> ${escFee(student.father||'N/A')}</span></div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;">
+                <thead><tr style="background:#1e3a8a;color:white;">
+                    <th style="padding:6px;border:1px solid #ccc;">Date</th><th style="padding:6px;border:1px solid #ccc;">Month</th><th style="padding:6px;border:1px solid #ccc;">Fee Head</th>
+                    <th style="padding:6px;border:1px solid #ccc;">Amount</th><th style="padding:6px;border:1px solid #ccc;">Discount</th><th style="padding:6px;border:1px solid #ccc;">Paid</th><th style="padding:6px;border:1px solid #ccc;">Due</th><th style="padding:6px;border:1px solid #ccc;">Status</th>
+                </tr></thead>
+                <tbody>${rows}
+                <tr style="font-weight:bold;background:#fef3c7;"><td colspan="3" style="padding:6px;border:1px solid #ccc;text-align:right;">Totals</td><td style="padding:6px;border:1px solid #ccc;text-align:right;">${totalFee.toLocaleString()}</td><td style="padding:6px;border:1px solid #ccc;text-align:right;">${totalDiscount.toLocaleString()}</td><td style="padding:6px;border:1px solid #ccc;text-align:right;">${totalPaid.toLocaleString()}</td><td style="padding:6px;border:1px solid #ccc;text-align:right;">${totalDue.toLocaleString()}</td><td style="padding:6px;border:1px solid #ccc;"></td></tr>
+                </tbody>
+            </table>
             <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
         </div>`;
         printHTML(page);
@@ -7659,7 +7853,7 @@ async function printPreviousPromotionData(index) {
     function buildCompleteStudentReport(c){let r=(db.students[c]||[]).map((s,i)=>{let x=getStudentResultSummaryData(s,c),subs=x.subjects.map(q=>`${q.name}: ${q.obtained||0}/${q.total}`).join(', ');return `<tr><td class="center">${i+1}</td><td>${s.name||''}</td><td class="center">${c}</td><td>${subs||'N/A'}</td><td>${s.father||''}</td><td class="center">${x.overall}%</td></tr>`}).join('');return `<div class="report-page">${reportPrintHeader(`Complete Student Report — Class ${c}`)}<div class="custom-report-meta"><span><b>Class:</b> ${c}</span><span><b>Print Date:</b> ${new Date().toLocaleDateString()}</span></div><table class="custom-report-table"><thead><tr><th>S.No</th><th>Student Name</th><th>Class</th><th>Subjects</th><th>Father Name</th><th>Total / Overall %</th></tr></thead><tbody>${r||'<tr><td colspan="6" class="center">No students found.</td></tr>'}</tbody></table><div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div></div>`;}
     function populateReportPrintClassSelect(){let s=document.getElementById('reportPrintClassSelect');if(s)s.innerHTML=['PG','Nursery','KG','1','2','3','4','5','6','7','8','9','10'].map(c=>`<option value="${c}">Class ${c}</option>`).join('');}
     function populateReportPrintStudentSelect(){let s=document.getElementById('reportPrintStudentSelect'),c=document.getElementById('reportPrintClassSelect')?.value;if(!s||!c)return;s.innerHTML='<option value="">Select student</option>'+(db.students[c]||[]).map((x,i)=>`<option value="${x.id||i}">${x.name||'Unnamed'}${x.rollNo?' | Roll: '+x.rollNo:''}</option>`).join('');}
-    function reportPrintTypeChanged(){let t=document.getElementById('reportPrintType')?.value;let needsClass=!['teacher-list','class-percentage'].includes(t);let needsStudent=['student-result','student-complete','student-fee-detail','student-attendance','previous-class-history','class-student-report'].includes(t);document.getElementById('reportPrintClassWrap')?.classList.toggle('hidden',!needsClass);document.getElementById('reportPrintStudentWrap')?.classList.toggle('hidden',!needsStudent);populateReportPrintClassSelect();populateReportPrintStudentSelect();}
+    function reportPrintTypeChanged(){let t=document.getElementById('reportPrintType')?.value;let needsClass=!['teacher-list','class-percentage','fee-defaulters'].includes(t);let needsStudent=['student-result','student-complete','student-fee-detail','student-attendance','previous-class-history','class-student-report'].includes(t);document.getElementById('reportPrintClassWrap')?.classList.toggle('hidden',!needsClass);document.getElementById('reportPrintStudentWrap')?.classList.toggle('hidden',!needsStudent);populateReportPrintClassSelect();populateReportPrintStudentSelect();}
     function reportPrintClassChanged(){populateReportPrintStudentSelect();}
     function findStudentForReport(className, id){return (db.students[className]||[]).find((x,i)=>String(x.id||i)===String(id));}
     async function ensureStudentReportHistoryLoaded_(studentId){
@@ -7829,7 +8023,48 @@ async function printPreviousPromotionData(index) {
         document.body.style.overflow='hidden';
     }
     function closeReportPrintSelection(){document.getElementById('reportPrintSelectionModal')?.classList.add('hidden');document.body.style.overflow='auto';}
-    async function confirmReportPrint(){let t=document.getElementById('reportPrintType')?.value,c=document.getElementById('reportPrintClassSelect')?.value||'PG',sid=document.getElementById('reportPrintStudentSelect')?.value,page='';if(t==='class-contact')page=buildClassContactReport(c);else if(t==='student-fee')page=buildStudentFeeListReport(c);else if(t==='student-basic')page=buildStudentBasicListReport(c);else if(t==='teacher-list')page=buildTeacherListReport();else if(t==='class-percentage')page=buildClassPercentageReport();else if(t==='student-result')page=sid?await buildStudentComprehensiveReport(findStudentForReport(c,sid),c):buildStudentResultSummaryReport(c);else if(t==='student-complete')page=sid?await buildStudentComprehensiveReport(findStudentForReport(c,sid),c):buildCompleteStudentReport(c);else if(t==='student-fee-detail'){const st=findStudentForReport(c,sid);page=st?await buildStudentFeeDetailReport(st,c):buildClassFeeHistoryReport(c);}else if(t==='student-attendance'){const st=findStudentForReport(c,sid);page=st?await buildStudentAttendanceReport(st,c):buildClassAttendanceReport(c);}else if(t==='previous-class-history'){const st=findStudentForReport(c,sid);showToast('Loading previous class data... ⏳','info');page=st?await buildPreviousClassHistoryReport(st):await buildClassPreviousClassHistoryReport(c);}else if(t==='class-student-report'){const st=findStudentForReport(c,sid);page=st?buildStudentReportPage(st,c):'';}else if(t==='class-all-report'){const students=db.students[c]||[];page=students.map(st=>buildStudentReportPage(st,c)).join('');}if(!page){showToast('Please select a student/report type','warning');return;}closeReportPrintSelection();printHTML(reportPrintStyles()+page);}
+    async function confirmReportPrint(){let t=document.getElementById('reportPrintType')?.value,c=document.getElementById('reportPrintClassSelect')?.value||'PG',sid=document.getElementById('reportPrintStudentSelect')?.value,page='';if(t==='class-contact')page=buildClassContactReport(c);else if(t==='student-fee')page=buildStudentFeeListReport(c);else if(t==='student-basic')page=buildStudentBasicListReport(c);else if(t==='teacher-list')page=buildTeacherListReport();else if(t==='class-percentage')page=buildClassPercentageReport();else if(t==='student-result')page=sid?await buildStudentComprehensiveReport(findStudentForReport(c,sid),c):buildStudentResultSummaryReport(c);else if(t==='student-complete')page=sid?await buildStudentComprehensiveReport(findStudentForReport(c,sid),c):buildCompleteStudentReport(c);else if(t==='student-fee-detail'){const st=findStudentForReport(c,sid);page=st?await buildStudentFeeDetailReport(st,c):buildClassFeeHistoryReport(c);}else if(t==='student-attendance'){const st=findStudentForReport(c,sid);page=st?await buildStudentAttendanceReport(st,c):buildClassAttendanceReport(c);}else if(t==='previous-class-history'){const st=findStudentForReport(c,sid);showToast('Loading previous class data... ⏳','info');page=st?await buildPreviousClassHistoryReport(st):await buildClassPreviousClassHistoryReport(c);}else if(t==='class-student-report'){const st=findStudentForReport(c,sid);page=st?buildStudentReportPage(st,c):'';}else if(t==='class-all-report'){const students=db.students[c]||[];page=students.map(st=>buildStudentReportPage(st,c)).join('');}else if(t==='fee-defaulters'){page=buildFeeDefaultersReport();}if(!page){showToast('Please select a student/report type','warning');return;}closeReportPrintSelection();printHTML(reportPrintStyles()+page);}
+
+    // School-wide Fee Defaulters: every student with ANY outstanding balance
+    // (Unpaid or Partial, any fee head, any month) in one report — this is the
+    // combined view that a "Fee Defaulters" menu item in a real fee module
+    // would show, built from data already on file rather than a fresh table.
+    function buildFeeDefaultersReport() {
+        const rows = [];
+        Object.entries(db.students || {}).forEach(([className, list]) => {
+            (list || []).forEach(student => {
+                const items = getStudentOutstandingFeeItems_(className, student.id);
+                if (!items.length) return;
+                const outstanding = items.reduce((n,f)=>n+feeDueValue(f),0);
+                const monthsList = items.map(f=>`${f.month} ${f.academicYear||''}`.trim()).join(', ');
+                const status = getStudentEffectiveFeeStatus_(student, className);
+                rows.push({ student, className, outstanding, monthsList, status, monthCount: items.length });
+            });
+        });
+        rows.sort((a,b)=> b.outstanding - a.outstanding);
+        const body = rows.map(r => `<tr>
+                <td style="padding:6px;border:1px solid #ccc;">${escFee(r.student.name||'')}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:center;">${escFee(r.className)}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:center;">${escFee(r.student.rollNo||'N/A')}</td>
+                <td style="padding:6px;border:1px solid #ccc;">${escFee(r.student.father||'N/A')}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:right;">₨ ${r.outstanding.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:center;">${r.monthCount}</td>
+                <td style="padding:6px;border:1px solid #ccc;text-align:center;font-weight:bold;">${escFee(r.status)}</td>
+            </tr>`).join('');
+        const grandTotal = rows.reduce((n,r)=>n+r.outstanding,0);
+        return `<div class="report-page">${reportPrintHeader('Fee Defaulters Report')}
+            <div class="custom-report-meta"><span><b>Total Defaulters:</b> ${rows.length}</span><span><b>Total Outstanding:</b> ₨ ${grandTotal.toLocaleString()}</span></div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:10px;">
+                <thead><tr style="background:#1e3a8a;color:white;">
+                    <th style="padding:6px;border:1px solid #ccc;text-align:left;">Student</th><th style="padding:6px;border:1px solid #ccc;">Class</th>
+                    <th style="padding:6px;border:1px solid #ccc;">Roll #</th><th style="padding:6px;border:1px solid #ccc;text-align:left;">Father/Guardian</th>
+                    <th style="padding:6px;border:1px solid #ccc;">Outstanding</th><th style="padding:6px;border:1px solid #ccc;">Months</th><th style="padding:6px;border:1px solid #ccc;">Status</th>
+                </tr></thead>
+                <tbody>${body || '<tr><td colspan="7" style="padding:10px;text-align:center;">No fee defaulters found.</td></tr>'}</tbody>
+            </table>
+            <div class="footer">Printing Date: ${new Date().toLocaleDateString()} | THE EDUCATORS SCHOOL | Ahmad Haseeb Campus</div>
+        </div>`;
+    }
 
     function printAllFilteredReports() {
         if (currentUser && currentUser.role === 'Teacher') { showToast('Only admin can print filtered reports', 'error'); return; }
@@ -9220,7 +9455,7 @@ async function printPreviousPromotionData(index) {
         </div>
     </div>
 
-<div id="reportPrintSelectionModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4"><div class="modal-content bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 relative"><div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-print mr-2"></i> Print Report</h2><button onclick="closeReportPrintSelection()" class="text-gray-400 hover:text-gray-600 text-3xl leading-none transition">×</button></div><div class="space-y-4"><div><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Report Type</label><select id="reportPrintType" onchange="reportPrintTypeChanged()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"><option value="class-contact">Class Contact List</option><option value="student-fee">Student Fee List</option><option value="student-basic">Student Basic List</option><option value="teacher-list">Teacher List</option><option value="class-percentage">Class Percentage Report</option><option value="student-result">Student — All Tests / Overall Result</option><option value="student-complete">Student — Complete Report</option><option value="student-fee-detail">Student — Complete Fee History</option><option value="student-attendance">Student — Attendance Report</option><option value="previous-class-history">Promoted Student — Previous Class History</option><option value="class-student-report">Class Report — Student Report</option><option value="class-all-report">Class Report — All Class Report</option></select></div><div id="reportPrintClassWrap"><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Class</label><select id="reportPrintClassSelect" onchange="reportPrintClassChanged()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"></select></div><div id="reportPrintStudentWrap" class="hidden"><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Student</label><select id="reportPrintStudentSelect" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"></select></div><div class="flex justify-end gap-2 pt-2"><button onclick="closeReportPrintSelection()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-xs px-4 py-2 rounded-xl">Cancel</button><button onclick="confirmReportPrint()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl"><i class="fa-solid fa-print"></i> Print Report</button></div></div></div></div>
+<div id="reportPrintSelectionModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4"><div class="modal-content bg-white w-full max-w-lg rounded-3xl shadow-2xl p-6 relative"><div class="flex justify-between items-center mb-4"><h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-print mr-2"></i> Print Report</h2><button onclick="closeReportPrintSelection()" class="text-gray-400 hover:text-gray-600 text-3xl leading-none transition">×</button></div><div class="space-y-4"><div><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Report Type</label><select id="reportPrintType" onchange="reportPrintTypeChanged()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"><option value="class-contact">Class Contact List</option><option value="student-fee">Student Fee List</option><option value="student-basic">Student Basic List</option><option value="teacher-list">Teacher List</option><option value="class-percentage">Class Percentage Report</option><option value="student-result">Student — All Tests / Overall Result</option><option value="student-complete">Student — Complete Report</option><option value="student-fee-detail">Student — Complete Fee History</option><option value="student-attendance">Student — Attendance Report</option><option value="previous-class-history">Promoted Student — Previous Class History</option><option value="class-student-report">Class Report — Student Report</option><option value="class-all-report">Class Report — All Class Report</option><option value="fee-defaulters">Fee Defaulters (All Classes)</option></select></div><div id="reportPrintClassWrap"><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Class</label><select id="reportPrintClassSelect" onchange="reportPrintClassChanged()" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"></select></div><div id="reportPrintStudentWrap" class="hidden"><label class="text-xs text-gray-500 font-bold uppercase block mb-1">Select Student</label><select id="reportPrintStudentSelect" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-sm"></select></div><div class="flex justify-end gap-2 pt-2"><button onclick="closeReportPrintSelection()" class="bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold text-xs px-4 py-2 rounded-xl">Cancel</button><button onclick="confirmReportPrint()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl"><i class="fa-solid fa-print"></i> Print Report</button></div></div></div></div>
 
 <script>
     document.addEventListener('keydown', function(e) {
