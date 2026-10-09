@@ -7655,13 +7655,13 @@ function printHTML(pagesHtml) {
             .print-toolbar button{border:0;border-radius:7px;padding:8px 14px;font-weight:700;cursor:pointer}
             .print-btn{background:#2563eb;color:#fff}.close-btn{background:#e5e7eb;color:#111827}
             .print-hint{font-size:12px;opacity:.85}
-            .report-page{width:210mm;min-height:297mm;margin:12px auto;background:#fff;padding:11mm 12mm 10mm;page-break-after:auto;break-after:auto;overflow:hidden;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif}
+            .report-page{box-sizing:border-box;width:210mm;max-width:100%;min-height:0;height:auto;margin:12px auto;background:#fff;padding:9mm 10mm 8mm;page-break-after:auto;break-after:auto;overflow:visible;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif}
             .report-page:last-child{page-break-after:auto;break-after:auto}
-            .report-header{text-align:center;border-bottom:2px solid #1e3a8a;padding-bottom:7mm;margin-bottom:7mm}
+            .report-header{text-align:center;border-bottom:2px solid #1e3a8a;padding-bottom:4mm;margin-bottom:4mm}
             .report-header h1{color:#1e3a8a;font-size:25px;font-weight:900;margin:0;line-height:1.18}
-            .report-header h2{color:#374151;font-size:16px;font-weight:700;margin:4px 0;line-height:1.2}
+            .report-header h2{color:#374151;font-size:16px;font-weight:700;margin:3px 0;line-height:1.2}
             .report-header h3{font-size:18px;font-weight:800;margin:7px 0 0;line-height:1.2}
-            .school-logo-print{width:96px!important;height:96px!important;max-width:96px!important;max-height:96px!important;object-fit:contain;vertical-align:middle;margin-right:12px!important}
+            .school-logo-print{width:108px!important;height:108px!important;max-width:108px!important;max-height:108px!important;object-fit:contain;vertical-align:middle;margin-right:8px!important}
             .report-info-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 28px;margin-bottom:7mm;font-size:13px;line-height:1.35}
             .report-info-grid div{padding:4px 0;border-bottom:1px dotted #ccc;overflow-wrap:anywhere}
             .report-info-grid b{color:#1e3a8a}
@@ -7686,11 +7686,23 @@ function printHTML(pagesHtml) {
             .no-print{display:block}
             @media print{
                 @page{size:A4 portrait;margin:0}
-                html,body{width:210mm;background:#fff}
+                html,body{width:210mm;max-width:210mm;margin:0!important;padding:0!important;background:#fff}
                 .print-toolbar{display:none!important}
-                .report-page{width:210mm;min-height:297mm;height:auto;margin:0;padding:11mm 12mm 10mm;box-shadow:none;overflow:visible}
+                .report-page{box-sizing:border-box;width:210mm;max-width:210mm;min-height:0;height:auto;margin:0;padding:9mm 10mm 8mm;box-shadow:none;overflow:visible;page-break-after:auto;break-after:auto}
                 .report-page:last-child{page-break-after:auto;break-after:auto}
                 .no-print{display:none!important}
+                .report-page{overflow:visible;overflow-wrap:anywhere}
+                .report-page table{width:100%;max-width:100%;border-collapse:collapse;table-layout:auto}
+                .report-page th,.report-page td{overflow-wrap:anywhere;word-break:normal}
+                .report-page thead{display:table-header-group}
+                .report-page tr{break-inside:avoid;page-break-inside:avoid}
+                .report-page .signatures,.report-page .report-header,.report-page .footer{break-inside:avoid;page-break-inside:avoid}
+                .report-header{padding-bottom:3mm!important;margin-bottom:3mm!important}
+                .report-header h1{line-height:1.12!important}
+                .report-header h2{margin:2px 0!important;line-height:1.15!important}
+                .report-header h3{margin-top:4px!important;line-height:1.15!important}
+                .school-logo-print{display:inline-block!important;width:108px!important;height:108px!important;max-width:108px!important;max-height:108px!important;object-fit:contain!important;vertical-align:middle!important;margin:0 8px 0 0!important}
+                img{max-width:100%;height:auto;}
             }
         </style></head><body>
         <div class="print-toolbar no-print">
@@ -7705,6 +7717,25 @@ function printHTML(pagesHtml) {
             window.addEventListener('load',function(){
                 const toggle=document.getElementById('editToggle');
                 const pages=Array.from(document.querySelectorAll('.report-page'));
+                pages.forEach(function(page){
+                    const header=page.querySelector('.report-header');
+                    const headerText=header ? (header.innerText||'') : '';
+                    if(!/COLLEGE ROAD MORE KHUNDA/i.test(headerText) || !/0302-8590888/i.test(headerText)){
+                        const topInfo=document.createElement('div');
+                        topInfo.className='educators-print-top no-print-screen';
+                        topInfo.innerHTML='THE EDUCATORS SCHOOL (AHMAD HASEEB CAMPUS)<br>COLLEGE ROAD MORE KHUNDA | PH: 0302-8590888';
+                        topInfo.style.cssText='text-align:center;font-weight:700;font-size:11px;line-height:1.25;margin:0 0 3mm;padding:0 0 2mm;border-bottom:1px solid #d1d5db;overflow-wrap:anywhere';
+                        page.insertBefore(topInfo,page.firstChild);
+                    }
+                    const existingFooterText=Array.from(page.querySelectorAll('.footer')).map(function(el){return el.innerText||'';}).join(' ');
+                    if(!/THE EDUCATORS SCHOOL \(AHMAD HASEEB CAMPUS\)/i.test(existingFooterText) || !/COLLEGE ROAD MORE KHUNDA/i.test(existingFooterText) || !/0302-8590888/i.test(existingFooterText)){
+                        const footer=document.createElement('div');
+                        footer.className='footer educators-print-footer';
+                        footer.textContent='Printing Date: '+new Date().toLocaleDateString()+' | THE EDUCATORS SCHOOL (AHMAD HASEEB CAMPUS) | COLLEGE ROAD MORE KHUNDA | PH: 0302-8590888';
+                        footer.style.cssText='text-align:center;margin-top:5mm;font-size:9px;line-height:1.25;color:#4b5563;border-top:1px solid #e5e7eb;padding-top:4px;overflow-wrap:anywhere';
+                        page.appendChild(footer);
+                    }
+                });
                 function setEditMode(on){pages.forEach(p=>{p.contentEditable=on?'true':'false';p.classList.toggle('edit-mode',on);});}
                 toggle.addEventListener('change',function(){setEditMode(this.checked);});
                 document.getElementById('printNow').addEventListener('click',function(){setEditMode(false);setTimeout(function(){window.print();},50);});
