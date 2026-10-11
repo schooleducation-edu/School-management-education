@@ -6505,11 +6505,11 @@ async function saveArchiveFast_(items, label='archive') {
                 const due = feeDueValue(f);
                 const shown = due>0 ? due : feePaidValue(f);
                 const label = due>0 ? '' : ' (Paid)';
-                return `<tr><td style="padding:6px;border:1px solid #999;">${escFee((f.feeType||'Monthly'))} Fee — ${escFee(f.month)} ${escFee(feeReportYearOnly_(f.academicYear||''))}${label}</td><td style="padding:6px;border:1px solid #999;text-align:right;">${shown.toLocaleString()}</td></tr>`;
+                return `<tr><td style="padding:4px 6px;border:1px solid #999;">${escFee((f.feeType||'Monthly'))} Fee — ${escFee(f.month)} ${escFee(feeReportYearOnly_(f.academicYear||''))}${label}</td><td style="padding:4px 6px;border:1px solid #999;text-align:right;">${shown.toLocaleString()}</td></tr>`;
             }).join('');
             const total = items.reduce((n,f)=>{ const due=feeDueValue(f); return n+(due>0?due:feePaidValue(f)); },0);
             return `
-            <div style="border:2px solid #1e3a8a;border-radius:10px;padding:16px;margin-bottom:16px;break-inside:avoid;">
+            <div class="voucher-card" style="border:2px solid #1e3a8a;border-radius:10px;padding:12px;margin-bottom:12px;break-inside:avoid;">
                 <div style="text-align:center;border-bottom:2px solid #1e3a8a;padding-bottom:8px;margin-bottom:10px;">
                     <div style="font-size:18px;font-weight:900;color:#1e3a8a;">${schoolLogoImgTag_()}THE EDUCATORS SCHOOL</div>
                     <div style="font-size:12px;color:#374151;">${schoolPrintTopInfo_()}</div>
@@ -6521,9 +6521,9 @@ async function saveArchiveFast_(items, label='archive') {
                     <tr><td style="padding:3px 6px 3px 0;"><b>Contact:</b> ${escFee(student.contact || 'N/A')}</td><td style="padding:3px 0;"><b>Issue Date:</b> ${escFee(issueDate)}</td></tr>
                 </table>
                 <table style="width:100%;border-collapse:collapse;font-size:12px;">
-                    <tr style="background:#1e3a8a;color:white;"><th style="padding:6px;border:1px solid #999;text-align:left;">Description</th><th style="padding:6px;border:1px solid #999;">Amount (₨)</th></tr>
+                    <tr style="background:#1e3a8a;color:white;"><th style="padding:4px 6px;border:1px solid #999;text-align:left;">Description</th><th style="padding:4px 6px;border:1px solid #999;">Amount (₨)</th></tr>
                     ${rows}
-                    <tr style="font-weight:bold;background:#fef3c7;"><td style="padding:6px;border:1px solid #999;">${selectedStatus==='Paid' ? 'Total Paid' : 'Total Due (All Fee Heads)'}</td><td style="padding:6px;border:1px solid #999;text-align:right;">${total.toLocaleString()}</td></tr>
+                    <tr style="font-weight:bold;background:#fef3c7;"><td style="padding:4px 6px;border:1px solid #999;">${selectedStatus==='Paid' ? 'Total Paid' : 'Total Due (All Fee Heads)'}</td><td style="padding:4px 6px;border:1px solid #999;text-align:right;">${total.toLocaleString()}</td></tr>
                 </table>
                 <div style="display:flex;justify-content:space-between;margin-top:14px;font-size:11px;color:#374151;">
                     <div>Parent/Guardian Signature: ______________</div>
@@ -6531,12 +6531,20 @@ async function saveArchiveFast_(items, label='archive') {
                 </div>
             </div>`;
         };
-        // Two vouchers per printed page (one .report-page = one page-break unit).
+        // One .report-page = one printed sheet. Cards are packed by their real height (a voucher with many
+        // outstanding months is tall), so a sheet holds 2 or more short vouchers but never splits one in half.
+        const SHEET_PX = 960;              // usable height of one A4 sheet (after margins) with a safety gap
+        const cardPx = n => 335 + 24 * n;   // measured: header + student block + signature + n table rows
         const pages = [];
-        for (let i = 0; i < students.length; i += 2) {
-            pages.push(`<div class="report-page">${students.slice(i, i + 2).map(voucherCard).join('')}</div>`);
-        }
-        printHTML(pages.join(''));
+        let cur = [], used = 0;
+        students.forEach(entry => {
+            const h = cardPx(entry.items.length);
+            if (cur.length && used + h > SHEET_PX) { pages.push(cur); cur = []; used = 0; }
+            cur.push(entry); used += h;
+        });
+        if (cur.length) pages.push(cur);
+        const pageHtml = pages.map(group => `<div class="report-page">${group.map(voucherCard).join('')}</div>`);
+        printHTML(pageHtml.join(''));
     }
 
     function printSelectedFeeRecords() {
@@ -7848,14 +7856,14 @@ function printHTML(pagesHtml) {
         printWindow.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Print Report</title><style>
             *{box-sizing:border-box}html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
             html,body{margin:0;padding:0;background:#eef1f5;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif;color:#111827}
-            .print-toolbar{position:sticky;top:0;z-index:9999;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#111827;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18);font-size:14px}
+            .print-toolbar{position:sticky;top:0;left:0;width:100%;z-index:9999;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:10px 14px;background:#111827;color:#fff;box-shadow:0 2px 8px rgba(0,0,0,.18);font-size:14px}
             .print-toolbar .title{font-weight:800;margin-right:auto}
             .print-toolbar label{display:flex;align-items:center;gap:7px;cursor:pointer;user-select:none}
             .print-toolbar input{width:18px;height:18px;accent-color:#2563eb}
             .print-toolbar button{border:0;border-radius:7px;padding:8px 14px;font-weight:700;cursor:pointer}
             .print-btn{background:#2563eb;color:#fff}.close-btn{background:#e5e7eb;color:#111827}
             .print-hint{font-size:12px;opacity:.85}@media (max-width:600px){.print-hint{display:none}}
-            .report-page{box-sizing:border-box;width:210mm;max-width:none;min-height:0;height:auto;margin:12px auto;background:#fff;padding:0 10mm;page-break-after:auto;break-after:auto;overflow:visible;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif}
+            .report-page{box-sizing:border-box;width:210mm;max-width:none;min-height:297mm;height:auto;margin:12px auto;background:#fff;padding:0 10mm;page-break-after:auto;break-after:auto;overflow:visible;font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif}
             .report-page:last-child{page-break-after:auto;break-after:auto}
             .report-header{text-align:center;border-bottom:2px solid #1e3a8a;padding-bottom:4mm;margin-bottom:4mm}
             .report-header h1{color:#1e3a8a;font-size:25px;font-weight:900;margin:0;line-height:1.18;display:flex;align-items:center;justify-content:center;gap:14px}
@@ -7880,7 +7888,7 @@ function printHTML(pagesHtml) {
             .signatures{display:flex;justify-content:space-between;gap:40px;margin-top:10mm;padding-top:5mm;border-top:1px solid #d1d5db;break-inside:avoid}
             .signatures .sig{text-align:center;width:200px;max-width:40%}.signatures .sig-line{border-top:2px solid #1e3a8a;padding-top:5px;margin-top:18px;font-size:12px;font-weight:bold}
             .fee-status{display:inline-block;padding:3px 10px;border-radius:15px;font-weight:bold;font-size:11px}.fee-paid{background:#d1fae5;color:#065f46}.fee-pending{background:#fee2e2;color:#991b1b}.fee-partial{background:#fef3c7;color:#92400e}
-            tr{break-inside:avoid;page-break-inside:avoid}.report-page img{max-width:100%}.pg-wrap{width:100%;border-collapse:collapse;border:0;table-layout:fixed}.pg-wrap>thead>tr>td,.pg-wrap>tfoot>tr>td,.pg-wrap>tbody>tr>td{padding:0;border:0!important;vertical-align:top;text-align:inherit}.pg-wrap>tbody>tr{break-inside:auto!important;page-break-inside:auto!important}.pg-sp{height:9mm}
+            tr{break-inside:avoid;page-break-inside:avoid}.report-page img{max-width:100%}.pg-wrap{width:100%;border-collapse:collapse;border:0;table-layout:fixed}.pg-wrap>thead>tr>td,.pg-wrap>tfoot>tr>td,.pg-wrap>tbody>tr>td{padding:0;border:0!important;vertical-align:top;text-align:inherit}.pg-wrap>tbody>tr{break-inside:auto!important;page-break-inside:auto!important}.pg-sp{height:9mm}.voucher-card .school-logo-print{display:block!important;width:54px!important;height:54px!important;max-width:54px!important;max-height:54px!important;margin:0 auto 4px!important}
             .edit-mode{outline:2px dashed #2563eb;outline-offset:-4px;cursor:text;background:#fff}
             [contenteditable="true"]{caret-color:#2563eb}
             .no-print{display:block}
@@ -7889,7 +7897,7 @@ function printHTML(pagesHtml) {
                 @page{size:A4 portrait;margin:0}
                 html,body{width:210mm;max-width:210mm;margin:0!important;padding:0!important;background:#fff}
                 .print-toolbar{display:none!important}
-                .report-page{box-sizing:border-box;width:210mm;max-width:210mm;min-height:0;height:auto;margin:0;padding:0 10mm;box-shadow:none;overflow:visible;page-break-after:auto;break-after:auto}
+                .report-page{box-sizing:border-box;width:210mm;max-width:210mm;min-height:0;height:auto;margin:0;padding:0 10mm;box-shadow:none;overflow:visible;page-break-after:always;break-after:page}
                 .report-page:last-child{page-break-after:auto;break-after:auto}
                 .no-print{display:none!important}
                 .report-page{overflow:visible;overflow-wrap:anywhere}
@@ -7921,7 +7929,7 @@ function printHTML(pagesHtml) {
                 function dmy(){var d=new Date();return ('0'+d.getDate()).slice(-2)+'/'+('0'+(d.getMonth()+1)).slice(-2)+'/'+d.getFullYear();}
                 pages.forEach(function(page){
                     var header=page.querySelector('.report-header');
-                    var headerText=((header?header.innerText:'')||'').toUpperCase();
+                    var headerText=((page.innerText||page.textContent||'')+'').toUpperCase();
                     if(headerText.indexOf('COLLEGE ROAD MORE KHUNDA')<0||headerText.indexOf('0302-8590888')<0){
                         var topInfo=document.createElement('div');
                         topInfo.className='educators-print-top';
