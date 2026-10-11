@@ -1351,11 +1351,12 @@ img, canvas, svg { max-width: 100%; height: auto; }
                     <div id="tab-fees" class="tab-content hidden">
                         <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
                             <h3 class="font-bold text-gray-800"><i class="fa-solid fa-coins mr-2 text-yellow-600"></i> Fee Management</h3>
-                            <div class="flex items-center gap-1 admin-only" title="Generate this month's Monthly Fee challans for all students">
+                            <div class="flex flex-wrap items-center gap-1 admin-only" title="Generate this month's Monthly Fee challans for all students">
                                     <select id="feeMonthlyChallanMonth" class="bg-white border border-gray-200 rounded-xl px-2 py-2 text-xs font-semibold focus:border-yellow-500 focus:outline-none">
                                         <option>January</option><option>February</option><option>March</option><option>April</option><option>May</option><option>June</option><option>July</option><option>August</option><option>September</option><option>October</option><option>November</option><option>December</option>
                                     </select>
                                     <button type="button" onclick="generateMonthlyFeeChallans_()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1"><i class="fa-solid fa-file-invoice"></i> Generate Monthly Challans</button>
+                                    <button type="button" onclick="deleteMonthlyFeeChallans_()" title="Move all UNPAID Monthly challans of the selected month to Trash" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1"><i class="fa-solid fa-trash"></i> Delete Monthly Challans</button>
                                 </div>
                                 <div class="flex flex-wrap gap-2">
                                 <button onclick="openSectionReportSelection_('student-fee')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-file-lines"></i> Class Report</button>
@@ -7118,6 +7119,7 @@ async function saveArchiveFast_(items, label='archive') {
             });
         });
         if(!pending.length){ showToast(`All students already have a Monthly Fee challan for ${month}.`,'warning'); return; }
+        if(!confirm(`Generate Monthly Fee challans for ${month} ${feeAcademicYearDisplay_(academicYear)}?\n\n${pending.length} students will get a challan.\n\nIf this is the wrong month, use "Delete Monthly Challans" afterwards.`)) return;
         try {
             await upsertRows_('fees', pending.map(feeToRow));
             db.fees.push(...pending);
@@ -7128,6 +7130,46 @@ async function saveArchiveFast_(items, label='archive') {
             console.error('Monthly challan generation failed:',e);
             showToast('❌ Monthly challans were NOT generated: '+(e.message||e),'error');
         }
+    }
+
+
+    // Moves every UNPAID Monthly challan of the selected month (current academic year) to Trash in one go.
+    // Paid or partly-paid records are never touched. Restorable from the Trash tab.
+    async function deleteMonthlyFeeChallans_() {
+        if (currentUser?.role === 'Teacher') { showToast('Only admin can delete monthly challans', 'error'); return; }
+        if (!navigator.onLine || !databaseLoadedFromSupabase) { showToast('Internet connection and loaded Supabase data are required. Nothing was deleted.', 'error'); return; }
+        const monthEl = document.getElementById('feeMonthlyChallanMonth');
+        const month = monthEl?.value || FEE_MONTHS[new Date().getMonth()];
+        const academicYear = getCurrentAcademicYear();
+        const wantMonth = normalizeFeeMonthKey_(month), wantYear = feeAcademicYearKey_(academicYear, month);
+        const sameMonth = (db.fees || []).filter(f => (f.feeType || 'Monthly') === 'Monthly'
+            && normalizeFeeMonthKey_(f.month) === wantMonth
+            && feeAcademicYearKey_(f.academicYear || f.academic_year, f.month) === wantYear);
+        const targets = sameMonth.filter(f => feePaidValue(f) <= 0);
+        const skipped = sameMonth.length - targets.length;
+        if (!targets.length) { showToast(skipped ? `No unpaid Monthly challans to delete for ${month} (${skipped} paid/partly paid record(s) are protected).` : `No Monthly challans found for ${month} ${feeAcademicYearDisplay_(academicYear)}.`, 'warning'); return; }
+        if (!confirm(`🗑️ Delete ${targets.length} UNPAID Monthly challan(s) for ${month} ${feeAcademicYearDisplay_(academicYear)}?\n\n` +
+            (skipped ? `${skipped} paid / partly paid record(s) will NOT be touched.\n\n` : '') +
+            `They move to Trash and can be restored from there.`)) return;
+        const items = targets.map(f => ({ id: f.id, type: 'fee', name: `${f.studentName} - ${f.month}`, details: `Class: ${f.class}, Fee: ₨ ${feeAmountValue(f)}, Paid: ₨ ${feePaidValue(f)}, Due: ₨ ${feeDueValue(f)}`, deletedDate: new Date().toLocaleString(), data: f, className: f.class }));
+        const done = new Set(); let failure = null; const CH = 50;
+        showToast(`⏳ Deleting ${items.length} challans…`, 'info');
+        try {
+            for (let i = 0; i < items.length; i += CH) {
+                const part = items.slice(i, i + CH);
+                await upsertRows_('deleted_records', part.map(t => ({ id: uuid_(), school_id: SUPABASE_SCHOOL_ID, record_type: 'fee', record_id: String(t.id), record_data: t.data || {}, deleted_at: new Date().toISOString() })));
+                await supabaseTableRequest('fees', { method: 'DELETE', query: `?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&id=in.(${part.map(t => '%22' + encodeURIComponent(String(t.id)) + '%22').join(',')})` });
+                part.forEach(t => done.add(String(t.id)));
+            }
+        } catch (e) { failure = e; console.error('Monthly challan delete failed:', e); }
+        // Update local data only for what really got deleted online.
+        db.deleted = db.deleted || [];
+        items.filter(t => done.has(String(t.id))).forEach(t => db.deleted.push(t));
+        db.fees = (db.fees || []).filter(f => !done.has(String(f.id)));
+        items.filter(t => done.has(String(t.id))).forEach(t => { const f = t.data; const st = db.students?.[f.class]?.find(x => String(x.id) === String(f.studentId)); if (st) st.feeStatus = getStudentEffectiveFeeStatus_(st, f.class); });
+        loadFees(); loadDeletedItems();
+        if (failure) showToast(`❌ Stopped after ${done.size} of ${items.length} challans: ${failure.message || failure}. The rest were NOT deleted — run it again.`, 'error');
+        else showToast(`✅ ${done.size} unpaid Monthly challans for ${month} moved to Trash.`, 'success');
     }
 
     async function saveFee(){
@@ -9363,7 +9405,7 @@ async function printPreviousPromotionData(index) {
 
     async function resetSupabaseSelected_(type){
         const del=table=>supabaseTableRequest(table,{method:'DELETE',query:`?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}`});
-        switch(type){case 'students':await del('fees');await del('attendance');await del('exam_results');await del('promotion_history');await del('student_archive');await del('students');break;case 'teachers':await del('teachers');break;case 'subjects':await del('subjects');break;case 'attendance':await del('attendance');await del('attendance_marked_dates');break;case 'exams':await del('exam_results');await del('exams');break;case 'examResults':await del('exam_results');break;case 'fees':await del('fees');break;case 'notices':await del('notices');break;case 'deleted':await del('deleted_records');break;case 'backup_data':await clearArchiveCenterState_();break;case 'backup_history':await del('backups');break;case 'all_backups':await clearArchiveCenterState_();await del('backups');break;case 'all_school_data':await del('exam_results');await del('attendance');await del('attendance_marked_dates');await del('fees');await del('exams');await del('subjects');await del('teachers');await del('deleted_records');await del('student_archive');await del('promotion_history');await del('students');await clearArchiveCenterState_();await del('backups');break;default:throw new Error('Unknown reset type.');}return true;
+        switch(type){case 'students':await del('fee_payments');await del('fees');await del('attendance');await del('exam_results');await del('promotion_history');await del('student_archive');await del('students');break;case 'teachers':await del('teachers');break;case 'subjects':await del('subjects');break;case 'attendance':await del('attendance');await del('attendance_marked_dates');break;case 'exams':await del('exam_results');await del('exams');break;case 'examResults':await del('exam_results');break;case 'fees':await del('fee_payments');await del('fees');break;case 'notices':await del('notices');break;case 'deleted':await del('deleted_records');break;case 'backup_data':await clearArchiveCenterState_();break;case 'backup_history':await del('backups');break;case 'all_backups':await clearArchiveCenterState_();await del('backups');break;case 'all_school_data':await del('exam_results');await del('attendance');await del('attendance_marked_dates');await del('fee_payments');await del('fees');await del('exams');await del('subjects');await del('teachers');await del('deleted_records');await del('student_archive');await del('promotion_history');await del('students');await clearArchiveCenterState_();await del('backups');break;default:throw new Error('Unknown reset type.');}return true;
     }
 
     async function executeSelectiveReset() {
