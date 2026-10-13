@@ -1318,6 +1318,7 @@ img, canvas, svg { max-width: 100%; height: auto; }
                                 <button onclick="openSectionReportSelection_('student-result')" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-file-lines"></i> Class Report</button>
                                 <button onclick="openSectionReportSelection_('student-result')" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition flex items-center gap-1 admin-only"><i class="fa-solid fa-print"></i> Print Report</button>
                                 <button onclick="addNewExam()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1"><i class="fa-solid fa-plus"></i> Add Exam</button>
+                                <button onclick="openDateSheet_()" class="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition flex items-center gap-1"><i class="fa-solid fa-calendar-days"></i> Date Sheet</button>
                             </div>
                         </div>
                         <div class="month-year-selector mb-4">
@@ -1505,9 +1506,19 @@ img, canvas, svg { max-width: 100%; height: auto; }
                     <p class="text-xs text-gray-500 font-bold uppercase">Subjects</p>
                 </div>
                 <div class="stats-card bg-white rounded-2xl shadow-sm p-4 text-center">
-                    <div class="text-pink-600 text-2xl mb-1"><i class="fa-solid fa-coins"></i></div>
-                    <p class="text-2xl font-bold text-gray-800" id="totalFees">₨ 0</p>
-                    <p class="text-xs text-gray-500 font-bold uppercase">Tuition Fees</p>
+                    <div class="text-pink-600 text-2xl mb-1"><i class="fa-solid fa-file-pen"></i></div>
+                    <p class="text-2xl font-bold text-gray-800" id="dashTotalExams">0</p>
+                    <p class="text-xs text-gray-500 font-bold uppercase">Total Exams</p>
+                </div>
+                <div class="stats-card bg-white rounded-2xl shadow-sm p-4 text-center">
+                    <div class="text-teal-600 text-2xl mb-1"><i class="fa-solid fa-calendar-check"></i></div>
+                    <p class="text-2xl font-bold text-gray-800" id="dashMonthAttendance">—</p>
+                    <p class="text-xs text-gray-500 font-bold uppercase" id="dashMonthAttendanceLabel">Attendance (This Month)</p>
+                </div>
+                <div class="stats-card bg-white rounded-2xl shadow-sm p-4 text-center cursor-pointer" onclick="openDashboardNotes_()" title="Open notes">
+                    <div class="text-amber-600 text-2xl mb-1"><i class="fa-solid fa-note-sticky"></i></div>
+                    <p class="text-2xl font-bold text-gray-800" id="dashNotesCount">0</p>
+                    <p class="text-xs text-gray-500 font-bold uppercase">Notes Today</p>
                 </div>
             </div>
             <div id="dashboardClassStudentSummary" class="bg-white rounded-2xl shadow-sm border border-gray-100 p-3 mb-2 no-print">
@@ -1521,6 +1532,68 @@ img, canvas, svg { max-width: 100%; height: auto; }
     </div>
 
     <!-- ==================== MODALS ==================== -->
+    <!-- Dashboard Notes Modal -->
+    <div id="dashNotesModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4 no-print">
+        <div class="modal-content bg-white w-full max-w-2xl rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto p-5 relative">
+            <div class="flex justify-between items-start mb-4">
+                <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-note-sticky mr-2 text-amber-600"></i> Notes</h2>
+                <button onclick="closeDashboardNotes_()" class="text-gray-400 hover:text-gray-600 text-3xl leading-none transition">×</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Date</label><input type="date" id="dashNoteDate" onchange="loadDashboardNotes_()" class="w-full border rounded-xl px-3 py-2 text-sm"><div id="dashNoteDay" class="text-xs text-gray-500 mt-1"></div></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Class</label><select id="dashNoteClass" class="w-full border rounded-xl px-3 py-2 text-sm"></select></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Type</label><select id="dashNoteType" class="w-full border rounded-xl px-3 py-2 text-sm"><option>Note</option><option>Classwork</option><option>Homework</option></select></div>
+            </div>
+            <div id="dashNoteForm">
+                <textarea id="dashNoteText" rows="4" placeholder="Write the note, classwork or homework here…" class="w-full border rounded-xl px-3 py-2 text-sm mb-2"></textarea>
+                <div class="flex gap-2 mb-4">
+                    <button onclick="saveDashboardNote_()" class="bg-amber-600 hover:bg-amber-700 text-white font-bold text-sm px-5 py-2 rounded-xl transition"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                    <button onclick="clearDashboardNoteForm_()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-sm px-4 py-2 rounded-xl transition">Clear</button>
+                </div>
+            </div>
+            <div class="text-xs font-bold text-gray-500 mb-2">Saved notes for this date</div>
+            <div id="dashNoteList" class="space-y-2"></div>
+        </div>
+    </div>
+
+    <!-- Date Sheet Modal -->
+    <div id="dateSheetModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4 no-print">
+        <div class="modal-content bg-white w-full max-w-3xl rounded-3xl shadow-2xl max-h-[90vh] overflow-y-auto p-5 relative">
+            <div class="flex justify-between items-start mb-4">
+                <h2 class="text-xl font-bold text-gray-800"><i class="fa-solid fa-calendar-days mr-2 text-teal-600"></i> Exam Date Sheet</h2>
+                <button onclick="closeDateSheet_()" class="text-gray-400 hover:text-gray-600 text-3xl leading-none transition">×</button>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Class</label><select id="dsClass" onchange="dsLoadClass_()" class="w-full border rounded-xl px-3 py-2 text-sm"></select></div>
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Title</label><input type="text" id="dsTitle" placeholder="e.g. Monthly Test - October 2026" class="w-full border rounded-xl px-3 py-2 text-sm"></div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+                <div><label class="block text-xs font-bold text-gray-500 mb-1">Print Type</label>
+                    <select id="dsMode" onchange="dsModeChanged_()" class="w-full border rounded-xl px-3 py-2 text-sm">
+                        <option value="class">Date Sheet — Class-wise (default)</option>
+                        <option value="student">Date Sheet — By Single Student</option>
+                        <option value="classStudents">Date Sheet — By All Students of This Class</option>
+                        <option value="all">Date Sheet — By All Classes (every student)</option>
+                    </select></div>
+                <div id="dsStudentWrap" style="display:none"><label class="block text-xs font-bold text-gray-500 mb-1">Student</label><select id="dsStudent" class="w-full border rounded-xl px-3 py-2 text-sm"></select></div>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead><tr class="text-xs text-gray-500 text-left"><th class="p-1">Date</th><th class="p-1">Day</th><th class="p-1">Subject</th><th class="p-1">Time</th><th class="p-1"></th></tr></thead>
+                    <tbody id="dsRows"></tbody>
+                </table>
+            </div>
+            <div class="flex flex-wrap gap-2 mt-3">
+                <button id="dsAddBtn" onclick="dsAddRow_()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-xs px-3 py-2 rounded-xl transition"><i class="fa-solid fa-plus"></i> Add Row</button>
+                <button id="dsLoadBtn" onclick="dsLoadSubjects_()" class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold text-xs px-3 py-2 rounded-xl transition"><i class="fa-solid fa-list"></i> Load Class Subjects</button>
+                <button id="dsSaveBtn" onclick="dsSave_()" class="bg-teal-600 hover:bg-teal-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+                <button onclick="dsPrintCurrent_()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition"><i class="fa-solid fa-print"></i> Print</button>
+                <button onclick="dsPrintAll_()" class="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs px-4 py-2 rounded-xl transition"><i class="fa-solid fa-print"></i> Print All Saved</button>
+                <button id="dsDeleteBtn" onclick="dsDelete_()" class="bg-red-600 hover:bg-red-700 text-white font-bold text-xs px-3 py-2 rounded-xl transition"><i class="fa-solid fa-trash"></i> Delete Sheet</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Student Modal -->
     <div id="studentModal" class="fixed inset-0 bg-black bg-opacity-60 hidden z-50 flex items-center justify-center p-4">
         <div class="modal-content bg-white w-full max-w-4xl rounded-3xl shadow-2xl max-h-[95vh] overflow-y-auto p-6 relative">
@@ -3270,7 +3343,10 @@ async function saveArchiveFast_(items, label='archive') {
             const fees=(db.fees||[]).map(feeToRow);
             const exams=(db.exams||[]).map(examToRow);
             const notices=(db.notices||[]).map(noticeToRow);
-            const deleted=(db.deleted||[]).map(x=>{ const sid=stableUuid_(x,'_supabaseId'); return {id:sid,school_id:SUPABASE_SCHOOL_ID,record_type:x.type||null,record_id:String(x.id||''),record_data:x.data||{},deleted_at:x.deletedDate && !isNaN(Date.parse(x.deletedDate)) ? new Date(x.deletedDate).toISOString() : new Date().toISOString()}; });
+            // NOTE: the Deleted Items (trash) list is intentionally NOT written by this full save.
+            // Every delete action already writes its own deleted_records row, and permanent delete removes it.
+            // Re-upserting the in-memory trash list here brought permanently deleted items back whenever an
+            // older open session (or a save that was already running) still had them in memory.
             const archives=(db.studentArchive||[]).map(x=>({id:stableUuid_(x,'_supabaseArchiveId'),school_id:SUPABASE_SCHOOL_ID,student_id:x.id||null,archive_type:'student',reason:x.archiveReason||'Manual archive',student_data:x}));
             const promotions=(db.promotionHistory||[]).map(x=>({id:stableUuid_(x,'_supabasePromotionId'),school_id:SUPABASE_SCHOOL_ID,student_id:x.studentId||null,from_class:x.fromClass||null,to_class:x.toClass||null,academic_year:x.academicYear||null,promoted_at:x.promotedAt||null,extra_data:{studentName:x.studentName||'',oldRoll:x.oldRoll,newRoll:x.newRoll,oldMarks:x.oldMarks||{},previousClassData:x.previousClassData||null,undoneAt:x.undoneAt||'',status:x.status||'active',promotedAt:x.promotedAt||null,retentionYears:x.retentionYears||PROMOTION_HISTORY_RETENTION_YEARS_,retentionUntil:x.retentionUntil||promotionRetentionUntil_(x.promotedAt)}}));
 
@@ -3282,7 +3358,7 @@ async function saveArchiveFast_(items, label='archive') {
             // school tables can be uploaded concurrently. This cuts save latency sharply
             // compared with the old sequential N-table loop.
             if (students.length) await upsertRows_('students',students);
-            const parallelTableMap = [['teachers',teachers],['subjects',subjects],['fees',fees],['exams',exams],['notices',notices],['deleted_records',deleted],['student_archive',archives],['promotion_history',promotions]];
+            const parallelTableMap = [['teachers',teachers],['subjects',subjects],['fees',fees],['exams',exams],['notices',notices],['student_archive',archives],['promotion_history',promotions]];
             await Promise.all(parallelTableMap.filter(([,rows])=>rows.length).map(([table,rows])=>upsertRows_(table,rows)));
 
             // Never make the user wait for the daily full backup. The primary data save
@@ -4374,7 +4450,9 @@ async function saveArchiveFast_(items, label='archive') {
         indexesToRemove.forEach(i => {
             const item = history[i];
             if (item) {
-                const supaId = stableUuid_(item, '_supabasePromotionId');
+                // Use the REAL row id. stableUuid_ invented a new random id for rows loaded from Supabase,
+                // so the delete hit nothing and the record came back after the next login.
+                const supaId = isUuid_(item._supabasePromotionId) ? String(item._supabasePromotionId) : (isUuid_(item.id) ? String(item.id) : '');
                 if (supaId) idsToRemove.push(supaId);
                 history.splice(i, 1);
             }
@@ -7401,7 +7479,7 @@ async function saveArchiveFast_(items, label='archive') {
                 const rows = await fetchAllTable_('promotion_history','id,school_id,student_id,from_class,to_class,academic_year,promoted_at,extra_data');
                 const fetched = Array.isArray(rows) ? rows.map(r=>{
                     const extra = r.extra_data && typeof r.extra_data === 'object' ? r.extra_data : {};
-                    return { id:String(r.id), studentId:r.student_id || '', fromClass:r.from_class || '', toClass:r.to_class || '',
+                    return { id:String(r.id), _supabasePromotionId:String(r.id), studentId:r.student_id || '', fromClass:r.from_class || '', toClass:r.to_class || '',
                         academicYear:r.academic_year || '', promotedAt:r.promoted_at || extra.promotedAt || '',
                         studentName:extra.studentName || '', oldRoll:extra.oldRoll, newRoll:extra.newRoll,
                         status:extra.status || 'active', undoneAt:extra.undoneAt || '',
@@ -8628,6 +8706,246 @@ async function printPreviousPromotionData(index) {
         }
     }
 
+    // ==================== DASHBOARD: month attendance, notes, exam date sheet ====================
+    const DASH_CLASSES_ = ['PG','Nursery','KG','1','2','3','4','5','6','7','8','9','10'];
+    const dashCache_ = { att: { at: 0, text: '' }, notes: { at: 0, text: '' } };
+    function dayNameOf_(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); if (!m) return ''; return ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][new Date(+m[1], +m[2] - 1, +m[3]).getDay()]; }
+    function isoToDmy_(iso) { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso || '')); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(iso || ''); }
+    async function countRows_(table, filter) {
+        const response = await fetch(`${SUPABASE_REST_BASE}${table}?select=id&${filter}&limit=1`, { method: 'GET', headers: supabaseRestHeaders({ Prefer: 'count=exact' }), cache: 'no-store' });
+        if (!response.ok) throw new Error(`${table}: HTTP ${response.status}`);
+        const m = /\/(\d+)$/.exec(response.headers.get('content-range') || '');
+        return m ? parseInt(m[1], 10) : 0;
+    }
+    // Whole-school attendance ratio for the current calendar month (P / (P + A)).
+    async function refreshDashboardMonthAttendance_(force) {
+        const el = document.getElementById('dashMonthAttendance'); if (!el) return;
+        const label = document.getElementById('dashMonthAttendanceLabel');
+        const now = new Date();
+        if (label) label.textContent = `Attendance (${FEE_MONTHS[now.getMonth()]})`;
+        if (!force && dashCache_.att.text && Date.now() - dashCache_.att.at < 60000) { el.textContent = dashCache_.att.text; return; }
+        if (!navigator.onLine || !databaseLoadedFromSupabase) return;
+        const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0');
+        const first = `${y}-${m}-01`, last = `${y}-${m}-${String(new Date(y, now.getMonth() + 1, 0).getDate()).padStart(2, '0')}`;
+        const base = `school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&attendance_date=gte.${first}&attendance_date=lte.${last}`;
+        try {
+            const [p, a] = await Promise.all([countRows_('attendance', base + '&status=eq.P'), countRows_('attendance', base + '&status=eq.A')]);
+            const text = (p + a) > 0 ? (Math.round(p * 1000 / (p + a)) / 10) + '%' : '—';
+            dashCache_.att = { at: Date.now(), text }; el.textContent = text;
+        } catch (e) { console.error('Month attendance failed:', e); }
+    }
+    async function refreshDashboardNotesCount_(force) {
+        const el = document.getElementById('dashNotesCount'); if (!el) return;
+        if (!force && dashCache_.notes.text !== '' && Date.now() - dashCache_.notes.at < 60000) { el.textContent = dashCache_.notes.text; return; }
+        if (!navigator.onLine || !databaseLoadedFromSupabase) return;
+        try {
+            const n = await countRows_('dashboard_notes', `school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&note_date=eq.${todayLocal_()}`);
+            dashCache_.notes = { at: Date.now(), text: String(n) }; el.textContent = String(n);
+        } catch (e) { console.error('Notes count failed:', e); }
+    }
+
+    // ---- Notes (date-wise / class-wise notes, classwork, homework) ----
+    let dashNotes_ = [], dashNoteEditId_ = null;
+    function isTeacherUser_() { return currentUser?.role === 'Teacher'; }
+    function openDashboardNotes_() {
+        const cls = document.getElementById('dashNoteClass');
+        cls.innerHTML = '<option value="">All Classes</option>' + DASH_CLASSES_.map(c => `<option value="${escFee(c)}">${escFee(c)}</option>`).join('');
+        document.getElementById('dashNoteDate').value = todayLocal_();
+        document.getElementById('dashNoteForm').style.display = isTeacherUser_() ? 'none' : '';
+        clearDashboardNoteForm_();
+        document.getElementById('dashNotesModal').classList.remove('hidden');
+        loadDashboardNotes_();
+    }
+    function closeDashboardNotes_() { document.getElementById('dashNotesModal').classList.add('hidden'); }
+    function clearDashboardNoteForm_() { dashNoteEditId_ = null; const t = document.getElementById('dashNoteText'); if (t) t.value = ''; const ty = document.getElementById('dashNoteType'); if (ty) ty.value = 'Note'; }
+    async function loadDashboardNotes_() {
+        const date = document.getElementById('dashNoteDate').value || todayLocal_();
+        document.getElementById('dashNoteDay').textContent = formatDateWithDay_(date);
+        const list = document.getElementById('dashNoteList');
+        list.innerHTML = '<div class="text-xs text-gray-400">Loading…</div>';
+        try {
+            const rows = await supabaseTableRequest('dashboard_notes', { query: `?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&note_date=eq.${date}&select=*&order=created_at.asc` });
+            dashNotes_ = Array.isArray(rows) ? rows : [];
+        } catch (e) { dashNotes_ = []; list.innerHTML = `<div class="text-xs text-red-600">Could not load notes: ${escFee(e.message || e)}</div>`; return; }
+        if (!dashNotes_.length) { list.innerHTML = '<div class="text-xs text-gray-400">No notes saved for this date.</div>'; return; }
+        const teacher = isTeacherUser_();
+        list.innerHTML = dashNotes_.map(n => `<div class="border rounded-xl p-3 text-sm"><div class="flex justify-between gap-2 text-xs text-gray-500 mb-1"><span><b>${escFee(n.note_type || 'Note')}</b> • ${escFee(n.class_name || 'All Classes')}</span>${teacher ? '' : `<span class="flex gap-2"><button onclick="editDashboardNote_('${escFee(n.id)}')" class="text-blue-600 font-bold">Edit</button><button onclick="deleteDashboardNote_('${escFee(n.id)}')" class="text-red-600 font-bold">Delete</button></span>`}</div><div style="white-space:pre-wrap">${escFee(n.content || '')}</div></div>`).join('');
+    }
+    function editDashboardNote_(id) {
+        const n = dashNotes_.find(x => String(x.id) === String(id)); if (!n) return;
+        dashNoteEditId_ = n.id;
+        document.getElementById('dashNoteText').value = n.content || '';
+        document.getElementById('dashNoteType').value = n.note_type || 'Note';
+        document.getElementById('dashNoteClass').value = n.class_name || '';
+        document.getElementById('dashNoteText').focus();
+    }
+    async function saveDashboardNote_() {
+        if (isTeacherUser_()) { showToast('Only admin can write notes', 'error'); return; }
+        const content = document.getElementById('dashNoteText').value.trim();
+        if (!content) { showToast('Please write something first', 'warning'); return; }
+        if (!navigator.onLine || !databaseLoadedFromSupabase) { showToast('Internet connection and loaded data are required. Note was NOT saved.', 'error'); return; }
+        const date = document.getElementById('dashNoteDate').value || todayLocal_();
+        const existing = dashNoteEditId_ ? dashNotes_.find(x => String(x.id) === String(dashNoteEditId_)) : null;
+        const row = { id: dashNoteEditId_ || ('note_' + uuid_()), school_id: SUPABASE_SCHOOL_ID, note_date: date, class_name: document.getElementById('dashNoteClass').value || null,
+            note_type: document.getElementById('dashNoteType').value || 'Note', content, created_by: existing?.created_by || currentReceiverName_() || null, updated_at: new Date().toISOString() };
+        try {
+            await upsertRows_('dashboard_notes', [row]);
+            showToast('✅ Note saved', 'success');
+            clearDashboardNoteForm_();
+            await loadDashboardNotes_();
+            refreshDashboardNotesCount_(true).catch(() => {});
+        } catch (e) { console.error('Note save failed:', e); showToast('❌ Note was NOT saved: ' + (e.message || e), 'error'); }
+    }
+    async function deleteDashboardNote_(id) {
+        if (isTeacherUser_()) { showToast('Only admin can delete notes', 'error'); return; }
+        if (!confirm('Delete this note?')) return;
+        try {
+            await supabaseTableRequest('dashboard_notes', { method: 'DELETE', query: `?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&id=eq.${encodeURIComponent(String(id))}` });
+            showToast('Note deleted', 'success');
+            if (String(dashNoteEditId_) === String(id)) clearDashboardNoteForm_();
+            await loadDashboardNotes_();
+            refreshDashboardNotesCount_(true).catch(() => {});
+        } catch (e) { console.error('Note delete failed:', e); showToast('❌ Note was NOT deleted: ' + (e.message || e), 'error'); }
+    }
+
+    // ---- Exam date sheet (class-wise) ----
+    let dsSheets_ = {};
+    function dsSheetId_(cls) { return `ds_${SUPABASE_SCHOOL_ID}_${cls}`; }
+    function dsRowHtml_(r) {
+        const dis = isTeacherUser_() ? ' disabled' : '';
+        return `<tr><td class="p-1"><input type="date" value="${escFee(r.date || '')}" onchange="dsDateChanged_(this)" class="ds-date border rounded-lg px-2 py-1"${dis}></td><td class="p-1 ds-day text-xs text-gray-600 whitespace-nowrap">${escFee(dayNameOf_(r.date))}</td><td class="p-1"><input type="text" value="${escFee(r.subject || '')}" placeholder="Subject" class="ds-subject border rounded-lg px-2 py-1 w-full"${dis}></td><td class="p-1"><input type="text" value="${escFee(r.time || '')}" placeholder="e.g. 9:00 AM - 11:00 AM" class="ds-time border rounded-lg px-2 py-1 w-full"${dis}></td><td class="p-1">${isTeacherUser_() ? '' : '<button onclick="this.closest(\'tr\').remove()" class="text-red-600 font-bold px-2">×</button>'}</td></tr>`;
+    }
+    function dsDateChanged_(input) { const d = input.closest('tr').querySelector('.ds-day'); if (d) d.textContent = dayNameOf_(input.value); }
+    function dsRenderRows_(rows) { document.getElementById('dsRows').innerHTML = rows.map(dsRowHtml_).join(''); }
+    function dsReadRows_() {
+        return [...document.querySelectorAll('#dsRows tr')].map(tr => ({ date: tr.querySelector('.ds-date').value || '', subject: tr.querySelector('.ds-subject').value.trim(), time: tr.querySelector('.ds-time').value.trim() })).filter(r => r.date || r.subject);
+    }
+    function dsAddRow_() { document.getElementById('dsRows').insertAdjacentHTML('beforeend', dsRowHtml_({})); }
+    async function openDateSheet_() {
+        const sel = document.getElementById('dsClass');
+        sel.innerHTML = DASH_CLASSES_.map(c => `<option value="${escFee(c)}">${escFee(c)}</option>`).join('');
+        const teacher = isTeacherUser_();
+        ['dsAddBtn', 'dsLoadBtn', 'dsSaveBtn', 'dsDeleteBtn'].forEach(id => { const b = document.getElementById(id); if (b) b.style.display = teacher ? 'none' : ''; });
+        document.getElementById('dsTitle').disabled = teacher;
+        document.getElementById('dateSheetModal').classList.remove('hidden');
+        try {
+            const rows = await supabaseTableRequest('date_sheets', { query: `?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&select=*` });
+            dsSheets_ = {}; (Array.isArray(rows) ? rows : []).forEach(r => { dsSheets_[r.class_name] = r; });
+        } catch (e) { console.error('Date sheet load failed:', e); dsSheets_ = {}; showToast('Could not load saved date sheets: ' + (e.message || e), 'warning'); }
+        dsLoadClass_();
+    }
+    function closeDateSheet_() { document.getElementById('dateSheetModal').classList.add('hidden'); }
+    function dsLoadClass_() {
+        const cls = document.getElementById('dsClass').value;
+        const sheet = dsSheets_[cls];
+        document.getElementById('dsTitle').value = sheet?.title || '';
+        const rows = Array.isArray(sheet?.rows) && sheet.rows.length ? sheet.rows : (isTeacherUser_() ? [] : [{}, {}, {}, {}, {}, {}]);
+        dsRenderRows_(rows);
+        dsFillStudents_();
+    }
+    function dsActiveStudents_(cls) {
+        const rollKey = x => { const n = parseFloat(String(x.rollNo || '').replace(/[^0-9.]/g, '')); return isNaN(n) ? 1e9 : n; };
+        return (db.students?.[cls] || []).filter(x => !x.status || String(x.status).toLowerCase() === 'active')
+            .slice().sort((a, b) => rollKey(a) - rollKey(b) || String(a.name || '').localeCompare(String(b.name || '')));
+    }
+    function dsFillStudents_() {
+        const sel = document.getElementById('dsStudent'); if (!sel) return;
+        const cls = document.getElementById('dsClass').value;
+        sel.innerHTML = dsActiveStudents_(cls).map(x => `<option value="${escFee(x.id)}">${escFee((x.rollNo ? x.rollNo + ' - ' : '') + (x.name || ''))}</option>`).join('');
+    }
+    function dsModeChanged_() {
+        const mode = document.getElementById('dsMode').value;
+        document.getElementById('dsStudentWrap').style.display = mode === 'student' ? '' : 'none';
+        if (mode === 'student') dsFillStudents_();
+    }
+    function dsLoadSubjects_() {
+        const cls = document.getElementById('dsClass').value;
+        const names = new Set();
+        (db.subjects?.[cls] || []).forEach(x => { const n = typeof x === 'string' ? x : x?.name; if (n) names.add(n); });
+        (db.exams || []).filter(e => String(e.class || e.className || '') === String(cls)).forEach(e => { if (e.subject) names.add(e.subject); });
+        if (!names.size) { showToast('No subjects are saved for this class yet — type them in the rows.', 'warning'); return; }
+        const existing = dsReadRows_();
+        const have = new Set(existing.map(r => r.subject.toLowerCase()));
+        const add = [...names].filter(n => !have.has(n.toLowerCase())).map(n => ({ subject: n }));
+        dsRenderRows_(existing.concat(add));
+    }
+    async function dsSave_() {
+        if (isTeacherUser_()) { showToast('Only admin can save date sheets', 'error'); return; }
+        if (!navigator.onLine || !databaseLoadedFromSupabase) { showToast('Internet connection and loaded data are required. Date sheet was NOT saved.', 'error'); return; }
+        const cls = document.getElementById('dsClass').value;
+        const rows = dsReadRows_().sort((a, b) => String(a.date || '9999').localeCompare(String(b.date || '9999')));
+        if (!rows.length) { showToast('Add at least one subject or date first', 'warning'); return; }
+        const row = { id: dsSheetId_(cls), school_id: SUPABASE_SCHOOL_ID, class_name: cls, title: document.getElementById('dsTitle').value.trim() || null, rows, created_by: dsSheets_[cls]?.created_by || currentReceiverName_() || null, updated_at: new Date().toISOString() };
+        try {
+            await upsertRows_('date_sheets', [row]);
+            dsSheets_[cls] = row; dsRenderRows_(rows);
+            showToast(`✅ Date sheet saved for class ${cls}`, 'success');
+        } catch (e) { console.error('Date sheet save failed:', e); showToast('❌ Date sheet was NOT saved: ' + (e.message || e), 'error'); }
+    }
+    async function dsDelete_() {
+        if (isTeacherUser_()) { showToast('Only admin can delete date sheets', 'error'); return; }
+        const cls = document.getElementById('dsClass').value;
+        if (!dsSheets_[cls]) { showToast('No saved date sheet for this class', 'warning'); return; }
+        if (!confirm(`Delete the saved date sheet of class ${cls}?`)) return;
+        try {
+            await supabaseTableRequest('date_sheets', { method: 'DELETE', query: `?school_id=eq.${encodeURIComponent(SUPABASE_SCHOOL_ID)}&id=eq.${encodeURIComponent(dsSheetId_(cls))}` });
+            delete dsSheets_[cls]; dsLoadClass_();
+            showToast('Date sheet deleted', 'success');
+        } catch (e) { console.error('Date sheet delete failed:', e); showToast('❌ Date sheet was NOT deleted: ' + (e.message || e), 'error'); }
+    }
+    function buildDateSheetPage_(sheet) {
+        const rows = (sheet.rows || []).filter(r => r.date || r.subject).slice().sort((a, b) => String(a.date || '9999').localeCompare(String(b.date || '9999')));
+        const body = rows.map((r, i) => `<tr><td class="center">${i + 1}</td><td class="center">${escFee(isoToDmy_(r.date))}</td><td class="center">${escFee(dayNameOf_(r.date))}</td><td>${escFee(r.subject || '')}</td><td class="center">${escFee(r.time || '')}</td></tr>`).join('');
+        return `<div class="report-page">${reportPrintHeader(escFee(sheet.title || 'Exam Date Sheet'))}<div class="custom-report-meta"><span><b>Class:</b> ${escFee(sheet.class_name || sheet.className || '')}</span><span><b>Total Papers:</b> ${rows.length}</span></div><table class="custom-report-table"><colgroup><col style="width:7%"><col style="width:18%"><col style="width:18%"><col style="width:32%"><col style="width:25%"></colgroup><thead><tr><th>#</th><th>Date</th><th>Day</th><th>Subject</th><th>Time</th></tr></thead><tbody>${body || '<tr><td colspan="5" class="center">No papers added.</td></tr>'}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div><div class="footer">${schoolPrintFooter_()}</div></div>`;
+    }
+    // One page per student: student details on top, then that class's papers subject by subject.
+    function buildStudentDateSheetPage_(sheet, student) {
+        const rows = (sheet.rows || []).filter(r => r.date || r.subject).slice().sort((a, b) => String(a.date || '9999').localeCompare(String(b.date || '9999')));
+        const body = rows.map((r, i) => `<tr><td class="center">${i + 1}</td><td>${escFee(r.subject || '')}</td><td class="center">${escFee(isoToDmy_(r.date))}</td><td class="center">${escFee(dayNameOf_(r.date))}</td><td class="center">${escFee(r.time || '')}</td></tr>`).join('');
+        return `<div class="report-page">${reportPrintHeader(escFee(sheet.title || 'Exam Date Sheet'))}<div class="custom-report-meta"><span><b>Student Name:</b> ${escFee(student.name || '')}</span><span><b>Father Name:</b> ${escFee(student.father || '')}</span><span><b>Class:</b> ${escFee(sheet.class_name || sheet.className || '')}</span><span><b>Roll No:</b> ${escFee(student.rollNo || '')}</span></div><table class="custom-report-table"><colgroup><col style="width:7%"><col style="width:33%"><col style="width:18%"><col style="width:18%"><col style="width:24%"></colgroup><thead><tr><th>#</th><th>Subject</th><th>Date</th><th>Day</th><th>Time</th></tr></thead><tbody>${body || '<tr><td colspan="5" class="center">No papers added.</td></tr>'}</tbody></table><div class="signatures"><div class="sig"><div class="sig-line">Class Teacher</div></div><div class="sig"><div class="sig-line">Principal</div></div></div><div class="footer">${schoolPrintFooter_()}</div></div>`;
+    }
+    function dsPrintCurrent_() {
+        const cls = document.getElementById('dsClass').value;
+        const rows = dsReadRows_();
+        const mode = document.getElementById('dsMode')?.value || 'class';
+        const title = document.getElementById('dsTitle').value.trim();
+        const current = { class_name: cls, title, rows };
+        if (mode === 'class') {
+            if (!rows.length) { showToast('Nothing to print — add subjects and dates first', 'warning'); return; }
+            printHTML(buildDateSheetPage_(current)); return;
+        }
+        if (mode === 'student') {
+            if (!rows.length) { showToast('Nothing to print — add subjects and dates first', 'warning'); return; }
+            const id = document.getElementById('dsStudent').value;
+            const st = dsActiveStudents_(cls).find(x => String(x.id) === String(id));
+            if (!st) { showToast('Please select a student', 'warning'); return; }
+            printHTML(buildStudentDateSheetPage_(current, st)); return;
+        }
+        if (mode === 'classStudents') {
+            if (!rows.length) { showToast('Nothing to print — add subjects and dates first', 'warning'); return; }
+            const list = dsActiveStudents_(cls);
+            if (!list.length) { showToast(`No active students in class ${cls}`, 'warning'); return; }
+            printHTML(list.map(st => buildStudentDateSheetPage_(current, st)).join('')); return;
+        }
+        // all classes: the open class uses what is on screen, every other class uses its SAVED date sheet
+        const pages = []; const skipped = [];
+        DASH_CLASSES_.forEach(c => {
+            const sheet = c === cls ? current : dsSheets_[c];
+            const students = dsActiveStudents_(c);
+            if (!students.length) return;
+            if (!sheet || !(sheet.rows || []).some(r => r.date || r.subject)) { skipped.push(c); return; }
+            students.forEach(st => pages.push(buildStudentDateSheetPage_(sheet, st)));
+        });
+        if (!pages.length) { showToast('No class has a saved date sheet with students yet', 'warning'); return; }
+        if (skipped.length) showToast(`Classes without a saved date sheet were skipped: ${skipped.join(', ')}`, 'info');
+        printHTML(pages.join(''));
+    }
+    function dsPrintAll_() {
+        const order = DASH_CLASSES_.filter(c => dsSheets_[c] && (dsSheets_[c].rows || []).length);
+        if (!order.length) { showToast('No saved date sheets to print', 'warning'); return; }
+        printHTML(order.map(c => buildDateSheetPage_(dsSheets_[c])).join(''));
+    }
+
     // ==================== STATISTICS ====================
     function updateDashboardClassStudentSummary_() {
         const row=document.getElementById('dashboardClassStudentSummaryRow'); if(!row) return;
@@ -8647,10 +8965,10 @@ async function printPreviousPromotionData(index) {
         classList.forEach(c => { (db.students[c] || []).forEach(s => { totalPresent += s.present || 0; totalAbsent += s.absences || 0; }); });
         const totalDays = totalPresent + totalAbsent || 1;
         document.getElementById('totalAttendance').textContent = Math.round((totalPresent / totalDays) * 100) + '%';
-        let totalFees = 0;
-        (db.fees || []).forEach(f => { if (f.status === 'Paid') totalFees += f.amount; });
-        document.getElementById('totalFees').textContent = `₨ ${totalFees.toLocaleString()}`;
         updateDashboardClassStudentSummary_();
+        const examBox = document.getElementById('dashTotalExams'); if (examBox) examBox.textContent = (db.exams || []).length;
+        refreshDashboardMonthAttendance_().catch(() => {});
+        refreshDashboardNotesCount_().catch(() => {});
     }
 
     function updateDate() { const now = new Date(); const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' }; document.getElementById('currentDate').textContent = now.toLocaleDateString('en-US', options); }
